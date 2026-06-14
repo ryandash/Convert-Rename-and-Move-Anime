@@ -2,9 +2,9 @@
 Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, and moving the anime into proper subfolders to allow Plex or Jellyfin to auto add the anime.
 
 ## Script autoconvert.bat
-(Given an anime video, interpolate to 48fps and upscale to 4k)
-- Use python script to extract anime title using anitopy
-- Use AniList to identify the correct anime title, season, and episode for the given anime
+- Given an anime video, interpolate to 48fps and upscale to 4k using vapoursynth
+- Use python script to extract anime title and season using anitopy
+- Use AniList to identify the correct anime title, season, and episode for a given anime
 - Make a full path directory and create the necessary folders for Jellyfin or Plex using python
 - Use ffmpeg with vapoursynth script to upscale to 4k and interpolate to 48fps outputting as an mp4 file
 - Clean up downloads by deleting all empty folders
