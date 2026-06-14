@@ -90,13 +90,15 @@ def normalize(s):
 def similarity(a, b):
     return int(SequenceMatcher(None, a, b).ratio() * 100)
 
-SANITIZE_RE = re.compile(r'[<>"/\\|?*]')
+SANITIZE_RE = re.compile(r"\s*[<>:\"/\\|?*]\s*")
+SPACE_RE = re.compile(r"\s+")
+
 def sanitize(name: str) -> str:
     if not name:
         return ""
 
-    name = name.replace(":", " ")
-    name = SANITIZE_RE.sub("", name)
+    name = SANITIZE_RE.sub(" ", name)
+    name = SPACE_RE.sub(" ", name)
 
     return name.strip()
 
@@ -144,7 +146,6 @@ def get_type_priority(media):
     )
 
 PART_RE = re.compile(r"\bpart\s*\d+\b")
-SPACE_RE = re.compile(r"\s+")
 def base_series_key(media):
     title = media.get("title", {})
     name = title.get("romaji") or title.get("english") or ""
