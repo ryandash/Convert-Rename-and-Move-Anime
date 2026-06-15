@@ -76,10 +76,12 @@ async def main(anime_video: str, retries=3):
                 if not root:
                     raise ValueError("No AniList match")
 
-                anime_title = sanitize(pick_title(root))
-                anime_year = root.get("seasonYear")
-
                 series = await build_series(session, root)
+
+                base_media = series[0] if series else root
+
+                anime_title = sanitize(pick_title(base_media))
+                anime_year = base_media.get("seasonYear")
 
                 episode = int(episode_number or 1)
                 parsed_season = int(parsed.get("anime_season") or 1)
