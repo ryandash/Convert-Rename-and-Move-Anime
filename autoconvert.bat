@@ -73,12 +73,12 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	set "file=%%f"
 	set "filename=%%~nf"
 
-	setlocal EnableDelayedExpansion
-
-	for /f "usebackq tokens=1,* delims=|" %%a in (`!pythonPath! "!UserDirectory!\Documents\new_anime_name_directory.py" "!file!"`) do (
+	for /f "usebackq tokens=1,* delims=|" %%a in (`%pythonPath% "%UserDirectory%\Documents\new_anime_name_directory.py" "%%f"`) do (
 		set "newDirectory=%%a"
 		set "newFileName=%%b"
 	)
+
+	setlocal EnableDelayedExpansion
 	echo !newDirectory!
 	echo !newFileName!
 

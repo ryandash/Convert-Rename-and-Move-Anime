@@ -1,6 +1,7 @@
 import anitopy
 import argparse
 import os
+import re
 import asyncio
 import aiohttp
 
@@ -18,34 +19,79 @@ from anilist_resolver import (
 # FALLBACK (OLD SYSTEM)
 # =========================
 
+ANIME_ROOT = r"\\Server\Videos\Anime"
+ANIME_MOVIES_ROOT = r"\\Server\Videos\Anime Movies"
+
 def fallback_anitopy(anime_video: str):
-    path, old_file_name = os.path.dirname(anime_video), os.path.basename(anime_video)
+    old_file_name = os.path.basename(anime_video)
     parsed = anitopy.parse(old_file_name)
 
     episode_number = parsed.get("episode_number")
     anime_title = str(parsed.get("anime_title")).replace(" - ", " ")
 
     anime_year = parsed.get("anime_year")
-    if anime_year:
-        anime_title = f"{anime_title} ({anime_year})"
+
+    # First try to find an existing folder that already contains a year
+    existing_folder = find_existing_anime_folder(anime_title)
+
+    if existing_folder:
+        folder_title = existing_folder
+    elif anime_year:
+        folder_title = f"{anime_title} ({anime_year})"
+    else:
+        folder_title = anime_title
 
     if episode_number is None:
         new_file_name = anime_title
         new_directory = os.path.join(
-            r"\\Server\Videos\Anime Movies", 
-            anime_title
+            ANIME_MOVIES_ROOT,
+            folder_title
         )
     else:
         anime_season = f"{int(parsed.get('anime_season', 1)):02}"
+
         new_file_name = f"{anime_title} - S{anime_season}E{episode_number}"
+
         new_directory = os.path.join(
-            r"\\Server\Videos\Anime",
-            anime_title,
+            ANIME_ROOT,
+            folder_title,
             f"Season {anime_season}"
         )
 
     os.makedirs(new_directory, exist_ok=True)
     return new_directory, new_file_name
+
+
+def find_existing_anime_folder(title: str):
+    """
+    Search existing anime folders and return the actual folder name
+    if a title match is found after removing '(YEAR)'.
+    """
+
+    normalized_title = title.casefold().strip()
+
+    try:
+        for folder in os.listdir(ANIME_ROOT):
+            full_path = os.path.join(ANIME_ROOT, folder)
+
+            if not os.path.isdir(full_path):
+                continue
+
+            # Remove trailing " (2024)"
+            folder_without_year = re.sub(
+                r"\s*\(\d{4}\)$",
+                "",
+                folder
+            ).casefold().strip()
+
+            if folder_without_year == normalized_title:
+                print(f"Found existing folder match: '{folder}' for title '{title}'")
+                return folder
+
+    except OSError:
+        pass
+
+    return None
 
 
 # =========================
@@ -102,7 +148,7 @@ async def main(anime_video: str, retries=3):
 
                 if episode_number is None:
                     new_directory = os.path.join(
-                        r"\\Server\Videos\Anime Movies",
+                        ANIME_MOVIES_ROOT,
                         folder_title
                     )
                     new_file_name = anime_title
@@ -111,7 +157,7 @@ async def main(anime_video: str, retries=3):
                     anime_season = f"{season_index:02d}"
 
                     new_directory = os.path.join(
-                        r"\\Server\Videos\Anime",
+                        ANIME_ROOT,
                         folder_title,
                         f"Season {anime_season}"
                     )
@@ -129,7 +175,7 @@ async def main(anime_video: str, retries=3):
                 return new_directory, new_file_name
 
             except Exception as e:
-                wait = 2 ** attempt
+                wait = 5 ** attempt
                 print(f"AniList error (attempt {attempt+1}/{retries}): {e}")
 
                 if attempt < retries - 1:
