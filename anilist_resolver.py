@@ -16,7 +16,8 @@ async def anilist_search(session, query: str):
       Page(perPage: 5) {
         media(search: $search, type: ANIME) {
           id
-          title { romaji english }
+          title { romaji english native }
+          synonyms
           season
           seasonYear
           episodes
@@ -49,6 +50,7 @@ async def anilist_get_media_batch(session, ids: list[int]):
         media(id_in: $ids) {
           id
           title { romaji english native }
+          synonyms
           season
           seasonYear
           episodes
@@ -281,11 +283,16 @@ def rebase_series(series, start_season):
 
 def get_all_titles(media):
     t = media.get("title", {})
-    return [
+
+    titles = [
         t.get("romaji"),
         t.get("english"),
-        t.get("native")
+        t.get("native"),
     ]
+
+    titles.extend(media.get("synonyms") or [])
+
+    return list(dict.fromkeys(filter(None, titles)))
 
 async def resolve_title(session, title: str):
     results = await anilist_search(session, title)
@@ -296,13 +303,18 @@ async def resolve_title(session, title: str):
     best = None
     best_score = -1
 
+    normalized_title = normalize(title)
+
     for m in results:
         titles = [x for x in get_all_titles(m) if x]
 
         score = max(
-            similarity(normalize(t), normalize(title))
+            similarity(normalize(t), normalized_title)
             for t in titles
         )
+
+        if score == 100:
+            return m
 
         if score > best_score:
             best_score = score
