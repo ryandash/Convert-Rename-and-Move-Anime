@@ -16,20 +16,21 @@ if exist "%LOCKFILE%" (
         goto CONTINUE_LOCK
     )
 
-    for /f %%a in ('
-        powershell -NoProfile -Command ^
-        "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - %LOCKTIME%"
-    ') do set ELAPSED=%%a
-
-    if not defined ELAPSED set ELAPSED=999999
-
 	setlocal EnableDelayedExpansion
 
+    for /f %%a in ('
+        powershell -NoProfile -Command ^
+        "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - !LOCKTIME!"
+    ') do set ELAPSED=%%a
+	
+    if not defined ELAPSED set ELAPSED=999999
+
+    echo !ELAPSED!
     if !ELAPSED! LSS 3600 (
         echo Another encoder instance appears to be running.
         exit /b
     )
-	endlocal
+    endlocal
 
     echo Removing stale lock.
     del "%LOCKFILE%"
@@ -79,6 +80,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	)
 
 	setlocal EnableDelayedExpansion
+	echo !file!
 	echo !newDirectory!
 	echo !newFileName!
 
