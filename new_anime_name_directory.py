@@ -107,6 +107,13 @@ async def main(anime_video: str, retries=3):
     print(parsed.get("anime_title"))
     raw_title = str(parsed.get("anime_title")).replace(" - ", " ")
 
+    season_number = parsed.get("anime_season")
+
+    if season_number is not None:
+        season_number = int(season_number)
+    
+    episode = int(episode_number or 1)
+
     async with aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(
             limit=20,
@@ -117,27 +124,29 @@ async def main(anime_video: str, retries=3):
     ) as session:
         for attempt in range(retries):
             try:
-                root = await resolve_title(session, raw_title)
+                root = await resolve_title(session, raw_title, season_number)
 
                 if not root:
                     raise ValueError("No AniList match")
 
-                series = await build_series(session, root)
+                fmt = (root.get("format") or "").upper()
 
-                base_media = series[0] if series else root
+                if fmt in ("TV", "ONA"):
+                    series = await build_series(session, root)
+                    base_media = series[0] if series else root
+                    
+                    series = rebase_series(series, season_number)
+                else:
+                    base_media = root
+                    series = [root]
 
                 anime_title = sanitize(pick_title(base_media))
                 anime_year = base_media.get("seasonYear")
 
-                episode = int(episode_number or 1)
-                parsed_season = int(parsed.get("anime_season") or 1)
-
-                series = rebase_series(series, parsed_season)
-
                 season_index, episode_index, eps = resolve_episode(
                     series,
                     episode,
-                    start_season=parsed_season
+                    start_season=season_number
                 )
 
                 folder_title = (
@@ -163,10 +172,10 @@ async def main(anime_video: str, retries=3):
                     )
 
                     if eps and eps != float("inf"):
-                        episode_str = str(episode_index).zfill(len(str(int(eps))))
+                        width = max(2, len(str(int(eps))))
+                        episode_str = str(episode_index).zfill(width)
                     else:
                         episode_str = f"{episode_index:02d}"
-                        
 
                     new_file_name = f"{anime_title} - S{anime_season}E{episode_str}"
 

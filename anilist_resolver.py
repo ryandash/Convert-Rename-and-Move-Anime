@@ -294,11 +294,33 @@ def get_all_titles(media):
 
     return list(dict.fromkeys(filter(None, titles)))
 
-async def resolve_title(session, title: str):
+def format_priority(media):
+    fmt = (media.get("format") or "").upper()
+    return FORMAT_PRIORITY.get(fmt, 999)
+
+async def resolve_title(session, title: str, season_number: int | None):
     results = await anilist_search(session, title)
 
+    if season_number is None or season_number == 0:
+        # Movie/OVA/Special release
+        allowed = {"MOVIE", "OVA", "SPECIAL", "TV_SPECIAL"}
+    else:
+        # Normal season
+        allowed = {"TV", "ONA"}
+
+    filtered = [
+        m for m in results
+        if (m.get("format") or "").upper() in allowed
+    ]
+
+    # Fall back if filtering removed everything.
+    if filtered:
+        results = filtered
+
+    results.sort(key=format_priority)
+
     if not results:
-        return title, None, None
+        return None
 
     best = None
     best_score = -1
@@ -313,12 +335,17 @@ async def resolve_title(session, title: str):
             for t in titles
         )
 
+        print(
+            f"Score {score} ({m['format']}) for {pick_title(m)} against {title}"
+        )
+
         if score == 100:
             return m
 
         if score > best_score:
             best_score = score
             best = m
+
     return best
 
 # =========================
