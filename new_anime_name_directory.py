@@ -138,11 +138,9 @@ async def main(anime_video: str, retries=3):
                             (i for i, media in enumerate(series) if media["id"] == root["id"]),
                             0
                         )
-                        base_media = root
-                        series = series[root_index:]
-                    else:
-                        base_media = series[0] if series else root
-                        series = rebase_series(series, season_number)
+                        season_number += root_index
+                    base_media = series[0] if series else root
+                    series = rebase_series(series, season_number)
                 else:
                     base_media = root
                     series = [root]

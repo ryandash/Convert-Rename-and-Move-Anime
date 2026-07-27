@@ -2,11 +2,12 @@
 
 for /f "delims=" %%a in ('where powershell') do set "powershell=%%a"
 set "pythonPath=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
+set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
+set "aegisubCli=%UserDirectory%\Documents\aegisub-cli.exe"
 set "file="
 set "filename="
 set "newDirectory="
 set "newFileName="
-set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
 
 if exist "%LOCKFILE%" (
     set /p LOCKTIME=<"%LOCKFILE%"
@@ -74,6 +75,14 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	set "file=%%f"
 	set "filename=%%~nf"
 
+	set "isVersioned=0"
+
+	echo !filename! | findstr /r /i "[0-9]v[2-9]" >nul
+	if not errorlevel 1 (
+		set "isVersioned=1"
+		echo This is a versioned release
+	)
+
 	for /f "usebackq tokens=1,* delims=|" %%a in (`%pythonPath% "%UserDirectory%\Documents\new_anime_name_directory.py" "%%f"`) do (
 		set "newDirectory=%%a"
 		set "newFileName=%%b"
@@ -84,6 +93,20 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	echo !newDirectory!
 	echo !newFileName!
 
+	if "!newDirectory!"=="" (
+		echo Failed to find filename.
+		pause
+		del "%LOCKFILE%"
+		exit /b 1
+	)
+
+	if "!newFileName!"=="" (
+		echo Failed to find filename.
+		pause
+		del "%LOCKFILE%"
+		exit /b 1
+	)
+
 	set "tempOutput=%UserDirectory%\ConvertedVideos"
 	if not exist "!tempOutput!" mkdir "!tempOutput!"
 
@@ -92,58 +115,139 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		echo %%a>"%LOCKFILE%"
 	)
 
+	set "encodedVideo=!newDirectory!\!newFileName!.mp4"
+
+	set "videoExists=0"
+
+	if exist "!encodedVideo!" (
+		set "videoExists=1"
+		echo Video already exists
+	)
+
+	set "audiocodec="
+
+	for /f %%a in ('
+		ffprobe -v error -select_streams a:0 ^
+		-show_entries stream^=codec_name ^
+		-of default^=nokey^=1:noprint_wrappers^=1 "!file!"
+	') do set "audiocodec=%%a"
+
+	echo Audio codec: !audiocodec!
+
+	if /I "!audiocodec!"=="aac" (
+		set "audiocmd=-c:a copy"
+	) else (
+		set "audiocmd=-c:a aac -q:a 3"
+	)
+
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
-	call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a -c:a aac -sn "!tempOutput!\!newFileName!.mp4"
+	if "!videoExists!"=="0" (
+		if "!isVersioned!"=="0" (
+			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a !audiocmd! -sn "!tempOutput!\!newFileName!.mp4"
 
-	REM Move file to final destination
-	move /Y "!tempOutput!\!newFileName!.mp4" "!newDirectory!\!newFileName!.mp4"
-	
-	set "filename_ps=!newFileName:[=`[!"
-	set "filename_ps=!filename_ps:]=`]!"
-	set "filename_ps=!filename_ps:'=''!"
-	set "directory_ps=!newDirectory:[=`[!"
-	set "directory_ps=!directory_ps:]=`]!"
-	set "directory_ps=!directory_ps:'=''!"
+			REM Move file to final destination\
+			move /Y "!tempOutput!\!newFileName!.mp4" "!encodedVideo!"
 
-	REM Extract all subtitles
-	set "counter=0"
-	for /f "tokens=1,2,3 delims=," %%a in ('ffprobe -loglevel error -select_streams s -show_entries stream^=index^,codec_name:stream_tags^=language -of csv^=p^=0 "!file!"') do (
-		set "sub_index=%%a"
-		set "codec=%%b"
-		set "lang=%%c"
-		echo !codec!
-
-		if /I "!lang!"=="eng" (
-			set "lang=default.eng"
-
-			REM Set extension and codec option
-			set "codec_arg=-c:s copy"
-			if /I "!codec!"=="hdmv_pgs_subtitle" (
-				set "ext=sup"
-			) else if /I "!codec!"=="dvd_subtitle" (
-				set "ext=sub"
-			) else if /I "!codec!"=="dvb_subtitle" (
-				set "ext=sub"
-			) else if /I "!codec!"=="xsub" (
-				set "ext=sub"
-			) else (
-				set "ext=ass"
-				set "codec_arg=-c:s ass"
+			if exist "!encodedVideo!" (
+				set "videoExists=1"
 			)
+		)
+	)
 
-			set "outfile=!newDirectory!\!newFileName!.!lang!.!counter!.!ext!"
+	if "!videoExists!"=="1" (
+		set "tempOutput_ps=!tempOutput:[=`[!"
+		set "tempOutput_ps=!tempOutput_ps:]=`]!"
+		set "tempOutput_ps=!tempOutput_ps:'=''!"
+		set "filename_ps=!newFileName:[=`[!"
+		set "filename_ps=!filename_ps:]=`]!"
+		set "filename_ps=!filename_ps:'=''!"
+		set "directory_ps=!newDirectory:[=`[!"
+		set "directory_ps=!directory_ps:]=`]!"
+		set "directory_ps=!directory_ps:'=''!"
 
-			REM Extract subtitle
-			if /I "!ext!"=="ass" (
-				set "utf8file=!outfile:.ass=.utf8.ass!"
-				ffmpeg -y -i "!file!" -map 0:!sub_index! !codec_arg! "!utf8file!"
-				!powershell! -Command "Get-Content -Path '!directory_ps!\!filename_ps!.!lang!.!counter!.utf8.ass' -Encoding UTF8 ^| Set-Content -Path '!directory_ps!\!filename_ps!.!lang!.!counter!.ass' -Encoding utf8"
-				del "!utf8file!"
-			) else (
-				ffmpeg -y -i "!file!" -map 0:!sub_index! !codec_arg! "!outfile!"
+		REM Extract all subtitles
+		set "counter=0"
+		
+		for /f "tokens=1,2,3 delims=," %%a in ('ffprobe -loglevel error -select_streams s -show_entries stream^=index^,codec_name:stream_tags^=language -of csv^=p^=0 "!file!"') do (
+			set "sub_index=%%a"
+			set "codec=%%b"
+			set "lang=%%c"
+
+			echo !codec!
+
+			if /I "!lang!"=="eng" (
+				
+				set "lang=default.eng"
+
+				REM Set extension and codec option
+
+				set "codec_arg=-c:s copy"
+				if /I "!codec!"=="hdmv_pgs_subtitle" (
+					set "ext=sup"
+				) else if /I "!codec!"=="dvd_subtitle" (
+					set "ext=sub"
+				) else if /I "!codec!"=="dvb_subtitle" (
+					set "ext=sub"
+				) else if /I "!codec!"=="xsub" (
+					set "ext=sub"
+				) else (
+					set "ext=ass"
+					set "codec_arg=-c:s ass"
+				)
+
+				set "outfile=!newDirectory!\!newFileName!.!lang!.!counter!.!ext!"
+
+				REM Extract subtitle
+				if /I "!ext!"=="ass" (
+
+					REM Intermediate files stay in tempOutput
+					
+					set "tempAss=!tempOutput!\!newFileName!.subtitle.!counter!.tmp.ass"
+					set "tempAssPowershell=!tempOutput_ps!\!filename_ps!.subtitle.!counter!.tmp.ass"
+					set "utf8TempPowershell=!tempOutput_ps!\!filename_ps!.subtitle.!counter!.utf8.ass"
+					set "utf8Temp=!tempOutput!\!newFileName!.subtitle.!counter!.utf8.ass"
+					set "resampledAss=!tempOutput!\!newFileName!.subtitle.!counter!.resampled.ass"
+
+					REM Final output filename
+					set "finalAss=!directory_ps!\!filename_ps!.!lang!.!counter!.ass"
+
+					echo Extracting ASS subtitle...
+					echo Temporary: !tempAss!
+
+					REM Extract subtitle to temporary location
+					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
+
+					REM Normalize UTF-8 encoding
+					!powershell! -Command "Get-Content -Path '!tempAssPowershell!' -Encoding UTF8 | Set-Content -Path '!utf8TempPowershell!' -Encoding UTF8"
+
+					REM Resample subtitle to 4k
+					!pythonPath! "!UserDirectory!\Documents\resample_subtitle.py" "!utf8Temp!" "!resampledAss!" "!encodedVideo!"
+
+					if exist "!resampledAss!" (
+						echo SUCCESS - output created
+					) else (
+						echo FAILED - output missing
+					)
+
+					REM Move resampled subtitle to final location
+					if exist "!resampledAss!" (
+						move /Y "!resampledAss!" "!finalAss!"
+					) else (
+						echo ERROR: resampling failed.
+						echo Copying original ASS instead.
+						move /Y "!utf8Temp!" "!finalAss!"
+					)
+
+					REM Cleanup temporary ASS
+					del "!utf8Temp!"
+					del "!tempAss!"
+
+				) else (
+					ffmpeg -y -i "!file!" -map 0:!sub_index! !codec_arg! "!outfile!"
+				)
+
+				set /a "counter+=1"
 			)
-
-			set /a "counter+=1"
 		)
 	)
 	
@@ -160,4 +264,4 @@ if exist "%UserDirectory%\Downloads\*.mkv" (
 	goto start
 )
 
-if exist "%LOCKFILE%" del "%LOCKFILE%"
+del "%LOCKFILE%"
