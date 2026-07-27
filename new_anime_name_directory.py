@@ -19,8 +19,8 @@ from anilist_resolver import (
 # FALLBACK (OLD SYSTEM)
 # =========================
 
-ANIME_ROOT = r"\\Server\Videos\Anime"
-ANIME_MOVIES_ROOT = r"\\Server\Videos\Anime Movies"
+ANIME_ROOT = r"Z:\Anime"
+ANIME_MOVIES_ROOT = r"Z:\Anime"
 
 def fallback_anitopy(anime_video: str):
     old_file_name = os.path.basename(anime_video)
@@ -104,15 +104,14 @@ async def main(anime_video: str, retries=3):
     parsed = anitopy.parse(old_file_name)
 
     episode_number = parsed.get("episode_number")
+    if episode_number is not None:
+        episode_number = int(episode_number)
     print(parsed.get("anime_title"))
     raw_title = str(parsed.get("anime_title")).replace(" - ", " ")
 
     season_number = parsed.get("anime_season")
-
     if season_number is not None:
         season_number = int(season_number)
-    
-    episode = int(episode_number or 1)
 
     async with aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(
@@ -124,7 +123,7 @@ async def main(anime_video: str, retries=3):
     ) as session:
         for attempt in range(retries):
             try:
-                root = await resolve_title(session, raw_title, season_number)
+                root, best_score = await resolve_title(session, raw_title, season_number, episode_number)
 
                 if not root:
                     raise ValueError("No AniList match")
@@ -133,15 +132,25 @@ async def main(anime_video: str, retries=3):
 
                 if fmt in ("TV", "ONA"):
                     series = await build_series(session, root)
-                    base_media = series[0] if series else root
-                    
-                    series = rebase_series(series, season_number)
+                    season_number = int(season_number or 1)
+                    if best_score >= 90:
+                        root_index = next(
+                            (i for i, media in enumerate(series) if media["id"] == root["id"]),
+                            0
+                        )
+                        base_media = root
+                        series = series[root_index:]
+                    else:
+                        base_media = series[0] if series else root
+                        series = rebase_series(series, season_number)
                 else:
                     base_media = root
                     series = [root]
 
                 anime_title = sanitize(pick_title(base_media))
                 anime_year = base_media.get("seasonYear")
+
+                episode = int(episode_number or 1)
 
                 season_index, episode_index, eps = resolve_episode(
                     series,

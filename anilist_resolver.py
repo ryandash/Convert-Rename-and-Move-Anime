@@ -298,15 +298,17 @@ def format_priority(media):
     fmt = (media.get("format") or "").upper()
     return FORMAT_PRIORITY.get(fmt, 999)
 
-async def resolve_title(session, title: str, season_number: int | None):
+async def resolve_title(session, title: str, season_number: int | None, episode_number: int | None):
     results = await anilist_search(session, title)
 
-    if season_number is None or season_number == 0:
-        # Movie/OVA/Special release
+    print(f"Found {len(results)} AniList results for {title}")
+
+    if season_number is not None and season_number > 0:
+        allowed = {"TV", "ONA"}
+    elif episode_number is None:
         allowed = {"MOVIE", "OVA", "SPECIAL", "TV_SPECIAL"}
     else:
-        # Normal season
-        allowed = {"TV", "ONA"}
+        allowed = {"TV", "ONA", "OVA", "SPECIAL", "TV_SPECIAL"}
 
     filtered = [
         m for m in results
@@ -320,10 +322,10 @@ async def resolve_title(session, title: str, season_number: int | None):
     results.sort(key=format_priority)
 
     if not results:
-        return None
+        return None, 0
 
     best = None
-    best_score = -1
+    best_score = 0
 
     normalized_title = normalize(title)
 
@@ -340,13 +342,13 @@ async def resolve_title(session, title: str, season_number: int | None):
         )
 
         if score == 100:
-            return m
+            return m, 100
 
         if score > best_score:
             best_score = score
             best = m
 
-    return best
+    return best, best_score
 
 # =========================
 # EPISODE MAPPING
