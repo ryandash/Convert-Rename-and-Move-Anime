@@ -20,7 +20,7 @@ from anilist_resolver import (
 # =========================
 
 ANIME_ROOT = r"Z:\Anime"
-ANIME_MOVIES_ROOT = r"Z:\Anime"
+ANIME_MOVIES_ROOT = r"Z:\Anime Movies"
 
 def fallback_anitopy(anime_video: str):
     old_file_name = os.path.basename(anime_video)
