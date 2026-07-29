@@ -94,6 +94,18 @@ def find_existing_anime_folder(title: str):
     return None
 
 
+def remove_year_from_title(title: str):
+    """
+    Remove trailing anime years like:
+    'Title 2025'
+    'Title (2025)'
+    """
+    return re.sub(
+        r"\s*\(?\b(19\d{2}|20\d{2})\)?$",
+        "",
+        title
+    ).strip()
+
 # =========================
 # MAIN (AniList + fallback)
 # =========================
@@ -107,7 +119,10 @@ async def main(anime_video: str, retries=3):
     if episode_number is not None:
         episode_number = int(episode_number)
     print(parsed.get("anime_title"))
-    raw_title = str(parsed.get("anime_title")).replace(" - ", " ")
+    print(parsed.get("anime_year"))
+    raw_title = remove_year_from_title(
+        str(parsed.get("anime_title")).replace(" - ", " ")
+    )
 
     season_number = parsed.get("anime_season")
     if season_number is not None:
