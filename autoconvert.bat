@@ -3,7 +3,6 @@
 for /f "delims=" %%a in ('where powershell') do set "powershell=%%a"
 set "pythonPath=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
 set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
-set "aegisubCli=%UserDirectory%\Documents\aegisub-cli.exe"
 set "file="
 set "filename="
 set "newDirectory="
@@ -69,7 +68,7 @@ REM Upgrade pip and install requirements
 timeout /t 5 /nobreak
 
 :start
-cd /d "%UserDirectory%\Documents\vapoursynth-portable"
+pushd "%UserDirectory%\Documents\vapoursynth-portable"
 for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	
 	set "file=%%f"
@@ -77,7 +76,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 
 	set "isVersioned=0"
 
-	echo !filename! | findstr /r /i "[0-9]v[2-9]" >nul
+	%powershell% -NoProfile -Command "if ('%%~nf' -match '\d+v[2-9]') { exit 0 } else { exit 1 }"
 	if not errorlevel 1 (
 		set "isVersioned=1"
 		echo This is a versioned release
@@ -140,15 +139,14 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		set "audiocmd=-c:a aac -q:a 3"
 	)
 
+	set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
+
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
 		if "!isVersioned!"=="0" (
-			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a !audiocmd! -sn "!tempOutput!\!newFileName!.mp4"
+			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a !audiocmd! -sn "!temporaryVideo!"
 
-			REM Move file to final destination\
-			move /Y "!tempOutput!\!newFileName!.mp4" "!encodedVideo!"
-
-			if exist "!encodedVideo!" (
+			if exist "!temporaryVideo!" (
 				set "videoExists=1"
 			)
 		)
@@ -163,11 +161,9 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 			set "codec=%%b"
 			set "lang=%%c"
 
-			echo !codec!
-
 			if /I "!lang!"=="eng" (
 				
-				set "lang=default.eng"
+				set "langFull=default.eng"
 
 				REM Set extension and codec option
 
@@ -185,7 +181,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					set "codec_arg=-c:s ass"
 				)
 
-				set "outfile=!newDirectory!\!newFileName!.!lang!.!counter!.!ext!"
+				set "outfile=!newDirectory!\!newFileName!.!langFull!.!counter!.!ext!"
 
 				REM Extract subtitle
 				if /I "!ext!"=="ass" (
@@ -202,7 +198,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
 
 					REM Resample subtitle to 4k
-					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!encodedVideo!"
+					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
 
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
@@ -220,7 +216,8 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					)
 
 					REM Cleanup temporary ASS
-					del "!tempAss!"
+					del "!tempAss!" 2>nul
+					del "!resampledAss!" 2>nul
 
 				) else (
 					ffmpeg -y -i "!file!" -map 0:!sub_index! !codec_arg! "!outfile!"
@@ -230,11 +227,16 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 			)
 		)
 	)
+
+	if exist "!temporaryVideo!" (
+		move /Y "!temporaryVideo!" "!encodedVideo!"
+	)
 	
 	del "!file!" /q /s
 
 	endlocal
 )
+popd
 
 REM Cleanup empty folders
 cd /d "%UserDirectory%\Downloads\"
