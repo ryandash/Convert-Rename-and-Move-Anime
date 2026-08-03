@@ -202,7 +202,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
 
 					REM Resample subtitle to 4k
-					!pythonPath! "!UserDirectory!\Documents\resample_subtitle.py" "!tempAss!" "!resampledAss!" "!encodedVideo!"
+					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!encodedVideo!"
 
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
