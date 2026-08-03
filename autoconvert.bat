@@ -155,16 +155,6 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	)
 
 	if "!videoExists!"=="1" (
-		set "tempOutput_ps=!tempOutput:[=`[!"
-		set "tempOutput_ps=!tempOutput_ps:]=`]!"
-		set "tempOutput_ps=!tempOutput_ps:'=''!"
-		set "filename_ps=!newFileName:[=`[!"
-		set "filename_ps=!filename_ps:]=`]!"
-		set "filename_ps=!filename_ps:'=''!"
-		set "directory_ps=!newDirectory:[=`[!"
-		set "directory_ps=!directory_ps:]=`]!"
-		set "directory_ps=!directory_ps:'=''!"
-
 		REM Extract all subtitles
 		set "counter=0"
 		
@@ -203,13 +193,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					REM Intermediate files stay in tempOutput
 					
 					set "tempAss=!tempOutput!\!newFileName!.subtitle.!counter!.tmp.ass"
-					set "tempAssPowershell=!tempOutput_ps!\!filename_ps!.subtitle.!counter!.tmp.ass"
-					set "utf8TempPowershell=!tempOutput_ps!\!filename_ps!.subtitle.!counter!.utf8.ass"
-					set "utf8Temp=!tempOutput!\!newFileName!.subtitle.!counter!.utf8.ass"
 					set "resampledAss=!tempOutput!\!newFileName!.subtitle.!counter!.resampled.ass"
-
-					REM Final output filename
-					set "finalAss=!directory_ps!\!filename_ps!.!lang!.!counter!.ass"
 
 					echo Extracting ASS subtitle...
 					echo Temporary: !tempAss!
@@ -217,11 +201,8 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					REM Extract subtitle to temporary location
 					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
 
-					REM Normalize UTF-8 encoding
-					!powershell! -Command "Get-Content -Path '!tempAssPowershell!' -Encoding UTF8 | Set-Content -Path '!utf8TempPowershell!' -Encoding UTF8"
-
 					REM Resample subtitle to 4k
-					!pythonPath! "!UserDirectory!\Documents\resample_subtitle.py" "!utf8Temp!" "!resampledAss!" "!encodedVideo!"
+					!pythonPath! "!UserDirectory!\Documents\resample_subtitle.py" "!tempAss!" "!resampledAss!" "!encodedVideo!"
 
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
@@ -231,15 +212,14 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 
 					REM Move resampled subtitle to final location
 					if exist "!resampledAss!" (
-						move /Y "!resampledAss!" "!finalAss!"
+						move /Y "!resampledAss!" "!outfile!"
 					) else (
 						echo ERROR: resampling failed.
 						echo Copying original ASS instead.
-						move /Y "!utf8Temp!" "!finalAss!"
+						move /Y "!tempAss!" "!outfile!"
 					)
 
 					REM Cleanup temporary ASS
-					del "!utf8Temp!"
 					del "!tempAss!"
 
 				) else (
