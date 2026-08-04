@@ -139,7 +139,11 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		set "audiocmd=-c:a aac -q:a 3"
 	)
 
-	set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
+	if "isVersioned"=="0" (
+		set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
+	) else (
+		set "temporaryVideo=!newDirectory!\!newFileName!.mp4"
+	)
 
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
