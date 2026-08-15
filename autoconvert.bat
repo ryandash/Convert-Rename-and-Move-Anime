@@ -1,6 +1,5 @@
 @echo off
 
-for /f "delims=" %%a in ('where powershell') do set "powershell=%%a"
 set "pythonPath=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
 set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
 set "file="
@@ -76,7 +75,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 
 	set "isVersioned=0"
 
-	%powershell% -NoProfile -Command "if ('%%~nf' -match '\d+v[2-9]') { exit 0 } else { exit 1 }"
+	powershell -NoProfile -Command "if ('%%~nf' -match '(?:\d| )v[2-9]\b') { exit 0 } else { exit 1 }"
 	if not errorlevel 1 (
 		set "isVersioned=1"
 		echo This is a versioned release
@@ -139,7 +138,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		set "audiocmd=-c:a aac -q:a 3"
 	)
 
-	if "isVersioned"=="0" (
+	if "!isVersioned!"=="0" (
 		set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
 	) else (
 		set "temporaryVideo=!newDirectory!\!newFileName!.mp4"
@@ -204,8 +203,13 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					REM Resample subtitle to 4k
 					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
 
+
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
+
+						REM Convert resampled ASS to UTF-8 with BOM
+						echo Converting ASS subtitle to UTF-8 with BOM...
+						powershell -NoProfile -Command "$p='!resampledAss!'; $c=[System.IO.File]::ReadAllText($p); [System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($true)))"
 					) else (
 						echo FAILED - output missing
 					)
