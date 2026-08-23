@@ -148,10 +148,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	if "!videoExists!"=="0" (
 		if "!isVersioned!"=="0" (
 			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a !audiocmd! -sn "!temporaryVideo!"
-
-			if exist "!temporaryVideo!" (
-				set "videoExists=1"
-			)
+			set "videoExists=1"
 		)
 	)
 
@@ -203,15 +200,15 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					REM Resample subtitle to 4k
 					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
 
-
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
 
 						REM Convert resampled ASS to UTF-8 with BOM
 						echo Converting ASS subtitle to UTF-8 with BOM...
-						powershell -NoProfile -Command "$p='!resampledAss!'; $c=[System.IO.File]::ReadAllText($p); [System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($true)))"
+						powershell -NoProfile -Command "$p='!resampledAss!'; $c=[System.IO.File]::ReadAllText($p); $c=[regex]::Replace($c,'\\blur[^\\}]*',''); [System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($true)))"
 					) else (
 						echo FAILED - output missing
+						pause
 					)
 
 					REM Move resampled subtitle to final location
@@ -219,6 +216,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 						move /Y "!resampledAss!" "!outfile!"
 					) else (
 						echo ERROR: resampling failed.
+						pause
 						echo Copying original ASS instead.
 						move /Y "!tempAss!" "!outfile!"
 					)
