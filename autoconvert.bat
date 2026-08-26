@@ -197,19 +197,22 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					REM Extract subtitle to temporary location
 					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
 
+					pushd "aegisub"
+
 					REM Resample subtitle to 4k
 					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
 
 					if exist "!resampledAss!" (
 						echo SUCCESS - output created
 
-						REM Convert resampled ASS to UTF-8 with BOM
-						echo Converting ASS subtitle to UTF-8 with BOM...
-						powershell -NoProfile -Command "$p='!resampledAss!'; $c=[System.IO.File]::ReadAllText($p); $c=[regex]::Replace($c,'\\blur[^\\}]*',''); [System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($true)))"
+						REM Downscale some override tags in ASS subtitle and convert to UTF-8 with BOM...
+						powershell -NoProfile -ExecutionPolicy Bypass -File "Fix-AssScaling.ps1" -OriginalSubtitles "!tempAss!" -ResampledSubtitles "!resampledAss!"
 					) else (
 						echo FAILED - output missing
 						pause
 					)
+
+					popd
 
 					REM Move resampled subtitle to final location
 					if exist "!resampledAss!" (

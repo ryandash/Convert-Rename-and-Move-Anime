@@ -1,0 +1,19 @@
+# ASS tags that should be restored to their
+# original pixel dimensions after Aegisub resampling.
+
+# Outline
+bord uniform
+xbord x
+ybord y
+
+# Shadow
+shad uniform
+xshad x
+yshad y
+
+# Blur
+blur uniform
+be uniform
+
+# Font spacing
+fsp x
