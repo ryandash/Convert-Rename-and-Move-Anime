@@ -147,7 +147,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
 		if "!isVersioned!"=="0" (
-			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -f yuv4mpegpipe -i pipe:0 -i "!file!" -c:v hevc_nvenc -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 10 -map 0:v -map 1:a !audiocmd! -sn "!temporaryVideo!"
+			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
 			set "videoExists=1"
 		)
 	)
