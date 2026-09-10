@@ -87,8 +87,15 @@ def _extract_year(aired: Any) -> Optional[int]:
 
 
 def _title_entries_to_dict(titles: Any) -> dict:
+    result = {
+        "default": None,
+        "japanese": None,
+        "english": None,
+        "synonyms": [],
+    }
+
     if not titles:
-        return {"default": None}
+        return result
 
     for entry in titles:
         if hasattr(entry, "title"):
@@ -100,26 +107,58 @@ def _title_entries_to_dict(titles: Any) -> dict:
         else:
             continue
 
-        if (
-            title
-            and (title_type or "").casefold() == "default"
-        ):
-            return {"default": title}
+        if not title:
+            continue
 
-    return {"default": None}
+        title_type = (title_type or "").casefold()
+
+        if title_type == "default":
+            result["default"] = title
+
+        elif title_type == "japanese":
+            result["japanese"] = title
+
+        elif title_type == "english":
+            result["english"] = title
+
+        elif title_type == "synonym":
+            result["synonyms"].append(title)
+
+    return result
 
 
 def _extract_titles_from_search_result(node: dict) -> dict:
+    result = {
+        "default": None,
+        "japanese": None,
+        "english": None,
+        "synonyms": [],
+    }
+
     for entry in node.get("titles", []) or []:
         title = entry.get("title")
         title_type = (entry.get("type") or "").casefold()
 
-        if title and title_type == "default":
-            return {"default": title}
+        if not title:
+            continue
 
-    return {
-        "default": node.get("title")
-    }
+        if title_type == "default":
+            result["default"] = title
+
+        elif title_type == "japanese":
+            result["japanese"] = title
+
+        elif title_type == "english":
+            result["english"] = title
+
+        elif title_type == "synonym":
+            result["synonyms"].append(title)
+
+    # Fallback for results without a titles array
+    if not result["default"]:
+        result["default"] = node.get("title")
+
+    return result
 
 
 def _normalize_search_result(node: dict) -> dict:
@@ -176,10 +215,7 @@ def _normalize_minimal_anime(anime: Any) -> Optional[dict]:
     }
 
 
-async def _ensure_full_anime(
-    jikan,
-    media: dict,
-) -> Optional[dict]:
+async def _ensure_full_anime(jikan, media: dict) -> Optional[dict]:
     mal_id = media.get("malId") or media.get("id")
 
     if not mal_id:
@@ -208,14 +244,32 @@ async def _ensure_full_anime(
 
 
 def get_all_titles(media: dict) -> list[str]:
-    default = (media.get("titles") or {}).get("default")
+    titles = media.get("titles") or {}
 
-    if default:
-        return [default]
+    result = []
 
-    title = media.get("title")
+    for key in (
+        "default",
+        "japanese",
+        "english",
+    ):
+        title = titles.get(key)
 
-    return [title] if title else []
+        if title:
+            result.append(title)
+
+    for title in titles.get("synonyms", []) or []:
+        if title:
+            result.append(title)
+
+    # Fallback
+    if not result:
+        title = media.get("title")
+
+        if title:
+            result.append(title)
+
+    return result
 
 
 def pick_title(media: dict) -> str:
@@ -296,10 +350,7 @@ def base_series_key(title: str) -> str:
     return SPACE_RE.sub(" ", title).strip()
 
 
-def _relation_candidates(
-    media: dict,
-    relation_name: str,
-) -> list[int]:
+def _relation_candidates(media: dict, relation_name: str) -> list[int]:
     result = []
 
     for relation in media.get("relations", []) or []:
@@ -324,10 +375,7 @@ def _relation_candidates(
     return result
 
 
-async def _get_related(
-    jikan,
-    mal_id: int,
-) -> Optional[dict]:
+async def _get_related(jikan, mal_id: int) -> Optional[dict]:
     anime = await jikan.get_anime_full(mal_id)
 
     if anime is None:
@@ -417,63 +465,77 @@ async def resolve_title(
     if not candidates:
         return None
 
-    scored = []
+    def score_candidates(use_base_title: bool = False):
+        scored = []
 
-    for media in candidates:
-        titles = get_all_titles(media)
+        for media in candidates:
+            titles = get_all_titles(media)
 
-        if not titles:
-            continue
+            if use_base_title:
+                titles = [
+                    candidate.split(":", 1)[0].strip()
+                    for candidate in titles
+                    if ":" in candidate
+                ]
 
-        best_score = max(
-            similarity(title, candidate)
-            for candidate in titles
-        )
+            if not titles:
+                continue
 
-        type_bonus = 0.0
-        fmt = media.get("format")
-
-        if season_number is not None:
-            if fmt in ("TV", "ONA"):
-                type_bonus = 5.0
-            elif fmt == "MOVIE":
-                type_bonus = -15.0
-
-        scored.append(
-            (
-                best_score + type_bonus,
-                best_score,
-                format_priority(media),
-                media,
+            best_score = max(
+                similarity(title, candidate)
+                for candidate in titles
             )
+
+            type_bonus = 0.0
+            fmt = media.get("format")
+
+            if season_number is not None:
+                if fmt in ("TV", "ONA"):
+                    type_bonus = 5.0
+                elif fmt == "MOVIE":
+                    type_bonus = -15.0
+
+            scored.append(
+                (
+                    best_score + type_bonus,
+                    best_score,
+                    format_priority(media),
+                    media,
+                )
+            )
+
+        scored.sort(
+            key=lambda item: (
+                item[0],
+                -item[2],
+            ),
+            reverse=True,
         )
 
-    if not scored:
-        return None
+        return scored
 
-    scored.sort(
-        key=lambda item: (
-            item[0],
-            -item[2],
-        ),
-        reverse=True,
-    )
+    # First pass: compare against complete titles.
+    scored = score_candidates()
 
-    _, best_score, _, best = scored[0]
+    if scored and scored[0][1] >= 90:
+        return await _ensure_full_anime(
+            jikan,
+            scored[0][3],
+        ) or scored[0][3]
 
-    if best_score < 75:
-        return None
+    # Second pass: compare against the portion before ":".
+    scored = score_candidates(use_base_title=True)
 
-    return await _ensure_full_anime(
-        jikan,
-        best,
-    ) or best
+    if scored and scored[0][1] >= 90:
+        return await _ensure_full_anime(
+            jikan,
+            scored[0][3],
+        ) or scored[0][3]
+
+    return None
 
 
-async def build_series(
-    jikan,
-    root_media: dict,
-) -> list[dict]:
+async def build_series(jikan, root_media: dict) -> list[dict]:
     if not root_media:
         return []
 
@@ -613,10 +675,7 @@ async def build_series(
     return result
 
 
-def rebase_series(
-    series: list[dict],
-    start_season: int,
-) -> list[dict]:
+def rebase_series(series: list[dict], start_season: int) -> list[dict]:
     if not series or start_season is None or start_season <= 1:
         return series
 
@@ -628,11 +687,7 @@ def rebase_series(
     return series[index:]
 
 
-def resolve_episode(
-    series: list[dict],
-    episode_number: int,
-    start_season: int = 1,
-) -> tuple[int, int]:
+def resolve_episode(series: list[dict], episode_number: int, start_season: int = 1) -> tuple[int, int]:
     if not series:
         return start_season, episode_number
 
