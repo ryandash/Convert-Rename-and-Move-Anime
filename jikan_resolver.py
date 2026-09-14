@@ -395,6 +395,20 @@ def _sort_series(series: list[dict]) -> list[dict]:
     )
 
 
+def base_series_keys(media: dict) -> set[str]:
+    """
+    Return normalized base-series keys for all available title variants.
+
+    This allows season parts to be matched even when "Part N" only
+    appears in an English title or synonym rather than the default title.
+    """
+    return {
+        base_series_key(title)
+        for title in get_all_titles(media)
+        if title
+    }
+
+
 def _merge_season_parts(series: list[dict]) -> list[dict]:
     """
     Merge entries representing multiple parts of the same season.
@@ -418,10 +432,7 @@ def _merge_season_parts(series: list[dict]) -> list[dict]:
 
         previous = merged[-1]
 
-        if (
-            base_series_key(pick_title(previous))
-            == base_series_key(pick_title(media))
-        ):
+        if base_series_keys(previous) & base_series_keys(media):
             previous["episodes"] = (
                 (previous.get("episodes") or 0)
                 + (media.get("episodes") or 0)
@@ -670,6 +681,7 @@ async def build_series(jikan, root_media: dict) -> list[dict]:
             continue
 
         seen_ids.add(mal_id)
+        print(media.get("title"), media.get("episodes"))
         result.append(media)
 
     return result

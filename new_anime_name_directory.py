@@ -7,6 +7,7 @@ import asyncio
 from safe_jikan import SafeJikan
 
 from jikan_resolver import (
+    rebase_series,
     resolve_title,
     build_series,
     resolve_episode,
@@ -231,8 +232,13 @@ async def main(anime_video: str, retries: int = 5):
                     new_file_name = anime_title
 
                 else:
-                    season_index, episode_index = resolve_episode(
+                    rebased_series = rebase_series(
                         series,
+                        actual_season,
+                    )
+                    
+                    season_index, episode_index = resolve_episode(
+                        rebased_series,
                         episode_number,
                         start_season=actual_season,
                     )
@@ -245,8 +251,8 @@ async def main(anime_video: str, retries: int = 5):
 
                     episode_count = None
 
-                    if 0 <= relative_index < len(series):
-                        episode_count = series[
+                    if 0 <= relative_index < len(rebased_series):
+                        episode_count = rebased_series[
                             relative_index
                         ].get("episodes")
 
