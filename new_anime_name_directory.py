@@ -19,6 +19,8 @@ from jikan_resolver import (
 ANIME_ROOT = r"Z:\Anime"
 ANIME_MOVIES_ROOT = r"Z:\Anime Movies"
 
+class NoJikanMatchError(Exception):
+    pass
 
 def fallback_anitopy(anime_video: str):
     """
@@ -166,7 +168,7 @@ async def main(anime_video: str, retries: int = 5):
                 )
 
                 if not root:
-                    raise ValueError(
+                    raise NoJikanMatchError(
                         f"No Jikan match found for '{raw_title}'"
                     )
 
@@ -295,6 +297,11 @@ async def main(anime_video: str, retries: int = 5):
                 print("Jikan success")
 
                 return new_directory, new_file_name
+
+            except NoJikanMatchError as e:
+                print(f"Jikan error: {e}")
+                print("No Jikan match found. Using fallback.")
+                return fallback_anitopy(anime_video)
 
             except Exception as e:
                 print(

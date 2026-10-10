@@ -21,18 +21,25 @@ SKIP_FORMATS = {
     "PV",
 }
 
-SANITIZE_RE = re.compile(r"\s*[<>:\"/\\|?*]\s*")
+SANITIZE_RE = re.compile(r'\s*[<>:"/\\|?*]\s*')
 SPACE_RE = re.compile(r"\s+")
-
+PUNCT_RE = re.compile(r"""[:!?,.'"`]""")
+DASH_RE = re.compile(r"[-_/\\]+")
+PART_RE = re.compile(r"\bpart\s+\d+\b", re.IGNORECASE)
+SEASON_RE = re.compile(
+    r"\b(\d+)(?:st|nd|rd|th)\s+season\b",
+    re.IGNORECASE,
+)
+YEAR_RE = re.compile(r"^(\d{4})")
 
 def sanitize(name: str) -> str:
     if not name:
         return ""
 
-    name = SANITIZE_RE.sub(" ", name)
-    name = SPACE_RE.sub(" ", name)
-
-    return name.rstrip(". ").strip()
+    return SPACE_RE.sub(
+        " ",
+        SANITIZE_RE.sub(" ", name),
+    ).rstrip(". ").strip()
 
 
 def normalize_title(title: str) -> str:
@@ -40,8 +47,8 @@ def normalize_title(title: str) -> str:
         return ""
 
     title = title.casefold()
-    title = re.sub(r"[:!?,.'\"`]", "", title)
-    title = re.sub(r"[-_/\\]+", " ", title)
+    title = PUNCT_RE.sub("", title)
+    title = DASH_RE.sub(" ", title)
 
     return SPACE_RE.sub(" ", title).strip()
 
@@ -56,70 +63,52 @@ def similarity(a: str, b: str) -> float:
     if a == b:
         return 100.0
 
-    return SequenceMatcher(None, a, b).ratio() * 100.0
-
+    return SequenceMatcher(None, a, b).ratio() * 100
 
 def _format_type(value: Optional[str]) -> str:
-    if not value:
-        return ""
+    value = (value or "").upper().strip()
 
-    value = value.upper().strip()
-
-    aliases = {
+    return {
         "TV SPECIAL": "TV_SPECIAL",
-    }
-
-    return aliases.get(value, value)
+    }.get(value, value)
 
 
 def _extract_year(aired: Any) -> Optional[int]:
-    if not isinstance(aired, dict):
-        return None
-
-    date_value = aired.get("from")
+    date_value = _get(aired, "from")
 
     if not date_value:
         return None
 
-    match = re.match(r"(\d{4})", str(date_value))
-
+    match = YEAR_RE.match(str(date_value))
     return int(match.group(1)) if match else None
 
 
-def _title_entries_to_dict(titles: Any) -> dict:
-    result = {
+def _empty_titles() -> dict:
+    return {
         "default": None,
         "japanese": None,
         "english": None,
         "synonyms": [],
     }
 
-    if not titles:
-        return result
+def _get(obj: Any, key: str, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
 
-    for entry in titles:
-        if hasattr(entry, "title"):
-            title = entry.title
-            title_type = entry.type
-        elif isinstance(entry, dict):
-            title = entry.get("title")
-            title_type = entry.get("type")
-        else:
-            continue
+    return getattr(obj, key, default)
+
+def _title_entries_to_dict(titles: Any) -> dict:
+    result = _empty_titles()
+
+    for entry in titles or []:
+        title = _get(entry, "title")
+        title_type = (_get(entry, "type", "") or "").casefold()
 
         if not title:
             continue
 
-        title_type = (title_type or "").casefold()
-
-        if title_type == "default":
-            result["default"] = title
-
-        elif title_type == "japanese":
-            result["japanese"] = title
-
-        elif title_type == "english":
-            result["english"] = title
+        if title_type in ("default", "japanese", "english"):
+            result[title_type] = title
 
         elif title_type == "synonym":
             result["synonyms"].append(title)
@@ -128,33 +117,8 @@ def _title_entries_to_dict(titles: Any) -> dict:
 
 
 def _extract_titles_from_search_result(node: dict) -> dict:
-    result = {
-        "default": None,
-        "japanese": None,
-        "english": None,
-        "synonyms": [],
-    }
+    result = _title_entries_to_dict(node.get("titles"))
 
-    for entry in node.get("titles", []) or []:
-        title = entry.get("title")
-        title_type = (entry.get("type") or "").casefold()
-
-        if not title:
-            continue
-
-        if title_type == "default":
-            result["default"] = title
-
-        elif title_type == "japanese":
-            result["japanese"] = title
-
-        elif title_type == "english":
-            result["english"] = title
-
-        elif title_type == "synonym":
-            result["synonyms"].append(title)
-
-    # Fallback for results without a titles array
     if not result["default"]:
         result["default"] = node.get("title")
 
@@ -164,9 +128,8 @@ def _extract_titles_from_search_result(node: dict) -> dict:
 def _normalize_search_result(node: dict) -> dict:
     titles = _extract_titles_from_search_result(node)
     aired = node.get("aired") or {}
-    media_type = _format_type(node.get("type"))
-
     mal_id = node.get("mal_id")
+    media_type = _format_type(node.get("type"))
 
     return {
         "id": mal_id,
@@ -188,30 +151,24 @@ def _normalize_minimal_anime(anime: Any) -> Optional[dict]:
     if anime is None:
         return None
 
-    titles = _title_entries_to_dict(
-        getattr(anime, "titles", [])
-    )
-
-    aired = getattr(anime, "aired", {}) or {}
-    media_type = _format_type(
-        getattr(anime, "type", "")
-    )
-
-    mal_id = getattr(anime, "malId", None)
+    titles = _title_entries_to_dict(_get(anime, "titles"))
+    aired = _get(anime, "aired") or {}
+    mal_id = _get(anime, "malId")
+    media_type = _format_type(_get(anime, "type"))
 
     return {
         "id": mal_id,
         "malId": mal_id,
-        "title": titles.get("default"),
+        "title": titles["default"],
         "titles": titles,
         "format": media_type,
         "type": media_type,
-        "episodes": getattr(anime, "episodes", 0) or 0,
-        "season": None,
+        "episodes": _get(anime, "episodes", 0) or 0,
+        "season": _get(anime, "season"),
         "seasonYear": _extract_year(aired),
         "aired": aired,
-        "url": getattr(anime, "url", None),
-        "relations": getattr(anime, "relations", []) or [],
+        "url": _get(anime, "url"),
+        "relations": _get(anime, "relations") or [],
     }
 
 
@@ -246,39 +203,27 @@ async def _ensure_full_anime(jikan, media: dict) -> Optional[dict]:
 def get_all_titles(media: dict) -> list[str]:
     titles = media.get("titles") or {}
 
-    result = []
+    result = [
+        titles[key]
+        for key in ("default", "japanese", "english")
+        if titles.get(key)
+    ]
 
-    for key in (
-        "default",
-        "japanese",
-        "english",
-    ):
-        title = titles.get(key)
+    result.extend(
+        title
+        for title in titles.get("synonyms", []) or []
+        if title
+    )
 
-        if title:
-            result.append(title)
-
-    for title in titles.get("synonyms", []) or []:
-        if title:
-            result.append(title)
-
-    # Fallback
-    if not result:
-        title = media.get("title")
-
-        if title:
-            result.append(title)
+    if not result and media.get("title"):
+        result.append(media["title"])
 
     return result
 
 
 def pick_title(media: dict) -> str:
-    default = (media.get("titles") or {}).get("default")
-
-    if default:
-        return sanitize(default)
-
-    title = media.get("title")
+    titles = media.get("titles") or {}
+    title = titles.get("default") or media.get("title")
 
     return sanitize(title) if title else "Unknown"
 
@@ -296,81 +241,50 @@ def is_skippable(media: dict) -> bool:
     if fmt in SKIP_FORMATS:
         return True
 
-    title = " ".join(get_all_titles(media)).casefold()
-
     if (
-        re.search(r"\b(ova|special)\b", title)
-        and fmt not in ("TV", "ONA", "MOVIE")
+        fmt in {"TV", "ONA"}
+        and media.get("episodes") == 1
     ):
         return True
 
-    return (
-        fmt in ("TV", "ONA")
-        and media.get("episodes") == 1
-    )
+    if fmt not in {"TV", "ONA", "MOVIE"}:
+        title = " ".join(get_all_titles(media)).casefold()
+
+        if re.search(r"\b(?:ova|special)\b", title):
+            return True
+
+    return False
 
 
 def base_series_key(title: str) -> str:
-    """
-    Normalize titles so different parts of the same numbered season
-    share the same key.
-
-    Examples:
-
-        2nd Season
-        2nd Season Part 2
-
-    both become:
-
-        season 2
-
-    while:
-
-        2nd Season
-        3rd Season
-
-    remain different.
-    """
     title = normalize_title(title)
-
-    # Remove "Part N".
-    title = re.sub(
-        r"\bpart\s+\d+\b",
-        "",
-        title,
-    )
-
-    # Normalize ordinal season names.
-    title = re.sub(
-        r"\b(\d+)(?:st|nd|rd|th)\s+season\b",
-        r"season \1",
-        title,
-    )
+    title = PART_RE.sub("", title)
 
     return SPACE_RE.sub(" ", title).strip()
 
 
-def _relation_candidates(media: dict, relation_name: str) -> list[int]:
+def _relation_candidates(
+    media: dict,
+    relation_name: str,
+) -> list[int]:
     result = []
 
-    for relation in media.get("relations", []) or []:
+    for relation in media.get("relations") or []:
         if (
-            (relation.get("relation") or "").casefold()
+            (_get(relation, "relation", "") or "").casefold()
             != relation_name.casefold()
         ):
             continue
 
-        for entry in relation.get("entry", []) or []:
+        for entry in _get(relation, "entry", []) or []:
             if (
-                (entry.get("type") or "").casefold()
-                != "anime"
+                (_get(entry, "type", "") or "").casefold()
+                == "anime"
             ):
-                continue
+                mal_id = _get(entry, "mal_id")
 
-            mal_id = entry.get("mal_id")
-
-            if mal_id:
-                result.append(mal_id)
+                if mal_id:
+                    result.append(mal_id)
 
     return result
 
@@ -396,12 +310,6 @@ def _sort_series(series: list[dict]) -> list[dict]:
 
 
 def base_series_keys(media: dict) -> set[str]:
-    """
-    Return normalized base-series keys for all available title variants.
-
-    This allows season parts to be matched even when "Part N" only
-    appears in an English title or synonym rather than the default title.
-    """
     return {
         base_series_key(title)
         for title in get_all_titles(media)
@@ -409,37 +317,29 @@ def base_series_keys(media: dict) -> set[str]:
     }
 
 
+def get_season_number(media: dict) -> int:
+    for title in get_all_titles(media):
+        match = SEASON_RE.search(title)
+
+        if match:
+            return int(match.group(1))
+
+    return 1
+
+
 def _merge_season_parts(series: list[dict]) -> list[dict]:
-    """
-    Merge entries representing multiple parts of the same season.
-
-    Example:
-
-        Season 2
-        Season 2 Part 2
-
-    becomes one season with the combined episode count.
-    """
     if not series:
         return []
 
     merged = []
 
     for media in series:
-        if not merged:
+        season = get_season_number(media)
+
+        if merged and get_season_number(merged[-1]) == season:
+            merged[-1]["episodes"] += media.get("episodes") or 0
+        else:
             merged.append(media)
-            continue
-
-        previous = merged[-1]
-
-        if base_series_keys(previous) & base_series_keys(media):
-            previous["episodes"] = (
-                (previous.get("episodes") or 0)
-                + (media.get("episodes") or 0)
-            )
-            continue
-
-        merged.append(media)
 
     return merged
 
@@ -448,6 +348,7 @@ async def resolve_title(
     jikan,
     title: str,
     season_number: Optional[int] = None,
+    year: Optional[int] = None,
 ) -> Optional[dict]:
     if not title:
         return None
@@ -455,6 +356,7 @@ async def resolve_title(
     result = await jikan.search_anime(
         query=title,
         limit=10,
+        year=year
     )
 
     if not result:
@@ -475,6 +377,12 @@ async def resolve_title(
 
     if not candidates:
         return None
+
+    if len(candidates) == 1:
+        return await _ensure_full_anime(
+            jikan,
+            candidates[0],
+        ) or candidates[0]
 
     def score_candidates(use_base_title: bool = False):
         scored = []
@@ -546,7 +454,72 @@ async def resolve_title(
     return None
 
 
-async def build_series(jikan, root_media: dict) -> list[dict]:
+async def _walk_relations(
+    jikan,
+    root: dict,
+    relation_name: str,
+    series_by_id: dict[int, dict],
+):
+    current = root
+    visited = set()
+
+    while current:
+        current_id = current.get("malId")
+
+        if current_id in visited:
+            break
+
+        if current_id:
+            visited.add(current_id)
+
+        candidates = []
+
+        for mal_id in _relation_candidates(
+            current,
+            relation_name,
+        ):
+            if mal_id in series_by_id:
+                candidate = series_by_id[mal_id]
+            else:
+                candidate = await _get_related(jikan, mal_id)
+
+            if candidate and not is_skippable(candidate):
+                candidates.append(candidate)
+
+        if not candidates:
+            break
+
+        if relation_name == "Prequel":
+            next_media = min(
+                candidates,
+                key=lambda media: (
+                    format_priority(media),
+                    -(media.get("seasonYear") or 0),
+                ),
+            )
+        else:
+            next_media = min(
+                candidates,
+                key=lambda media: (
+                    format_priority(media),
+                    media.get("seasonYear") or 9999,
+                ),
+            )
+
+        next_id = next_media.get("malId")
+
+        if not next_id or next_id in series_by_id:
+            break
+
+        series_by_id[next_id] = next_media
+        current = next_media
+
+
+async def build_series(
+    jikan,
+    root_media: dict,
+) -> list[dict]:
+
     if not root_media:
         return []
 
@@ -565,108 +538,30 @@ async def build_series(jikan, root_media: dict) -> list[dict]:
     if root_id:
         series_by_id[root_id] = root_media
 
-    # Walk backwards through prequels.
-    current = root_media
-    visited = set()
+    await _walk_relations(
+        jikan,
+        root_media,
+        "Prequel",
+        series_by_id,
+    )
 
-    while current:
-        current_id = current.get("malId")
-
-        if current_id in visited:
-            break
-
-        if current_id:
-            visited.add(current_id)
-
-        candidates = []
-
-        for mal_id in _relation_candidates(
-            current,
-            "Prequel",
-        ):
-            candidate = (
-                series_by_id.get(mal_id)
-                or await _get_related(jikan, mal_id)
-            )
-
-            if candidate and not is_skippable(candidate):
-                candidates.append(candidate)
-
-        if not candidates:
-            break
-
-        previous = min(
-            candidates,
-            key=lambda media: (
-                format_priority(media),
-                -(media.get("seasonYear") or 0),
-            ),
-        )
-
-        previous_id = previous.get("malId")
-
-        if previous_id in series_by_id:
-            break
-
-        series_by_id[previous_id] = previous
-        current = previous
-
-    # Walk forwards through sequels.
-    current = root_media
-    visited = set()
-
-    while current:
-        current_id = current.get("malId")
-
-        if current_id in visited:
-            break
-
-        if current_id:
-            visited.add(current_id)
-
-        candidates = []
-
-        for mal_id in _relation_candidates(
-            current,
-            "Sequel",
-        ):
-            candidate = (
-                series_by_id.get(mal_id)
-                or await _get_related(jikan, mal_id)
-            )
-
-            if candidate and not is_skippable(candidate):
-                candidates.append(candidate)
-
-        if not candidates:
-            break
-
-        next_media = min(
-            candidates,
-            key=lambda media: (
-                format_priority(media),
-                media.get("seasonYear") or 9999,
-            ),
-        )
-
-        next_id = next_media.get("malId")
-
-        if next_id in series_by_id:
-            break
-
-        series_by_id[next_id] = next_media
-        current = next_media
+    await _walk_relations(
+        jikan,
+        root_media,
+        "Sequel",
+        series_by_id,
+    )
 
     series = list(series_by_id.values())
 
-    filtered = [
+    tv_series = [
         media
         for media in series
-        if media.get("format") in ("TV", "ONA")
+        if media.get("format") in {"TV", "ONA"}
     ]
 
-    if filtered:
-        series = filtered
+    if tv_series:
+        series = tv_series
 
     series = _sort_series(series)
     series = _merge_season_parts(series)
@@ -681,7 +576,12 @@ async def build_series(jikan, root_media: dict) -> list[dict]:
             continue
 
         seen_ids.add(mal_id)
-        print(media.get("title"), media.get("episodes"))
+
+        print(
+            media.get("title"),
+            media.get("episodes"),
+        )
+
         result.append(media)
 
     return result
