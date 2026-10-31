@@ -197,15 +197,11 @@ class SafeJikan:
         type_: str | None = None,
         page: int | None = None,
         limit: int | None = None,
+        year: int | str | None = None,
     ) -> dict:
-        if (
-            query is None
-            and type_ is None
-            and page is None
-        ):
+        if (query is None):
             raise ValueError(
-                "search_anime() requires at least one of: "
-                "query, type_, or page."
+                "search_anime() requires a query parameter."
             )
 
         if query is not None:
@@ -229,6 +225,11 @@ class SafeJikan:
 
         if page:
             params["page"] = page
+
+        if year:
+            year = int(year)
+            params["start_date"] = f"{year}-01-01"
+            params["end_date"] = f"{year}-12-31"
 
         result = await self._retry_on_failure(
             self.anime_list,

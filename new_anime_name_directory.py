@@ -13,11 +13,17 @@ from jikan_resolver import (
     resolve_episode,
     sanitize,
     pick_title,
+    find_first_season_parent
 )
 
 
 ANIME_ROOT = r"Z:\Anime"
 ANIME_MOVIES_ROOT = r"Z:\Anime Movies"
+
+ANIME_SPECIALS_FOLDER = "Specials"
+
+SPECIAL_FORMATS = {"TV_SPECIAL", "SPECIAL", "OVA"}
+SERIES_FORMATS = {"TV", "ONA"}
 
 class NoJikanMatchError(Exception):
     pass
@@ -116,6 +122,73 @@ def remove_year_from_title(title: str):
     ).strip()
 
 
+
+def build_movie_path(anime_title: str, anime_year: int | None):
+    folder_title = (
+        f"{anime_title} ({anime_year})"
+        if anime_year
+        else anime_title
+    )
+
+    return create_path(
+        os.path.join(ANIME_MOVIES_ROOT, folder_title),
+        anime_title,
+    )
+
+
+def build_special_path(parent_title: str, parent_year: int | None, anime_title: str, mal_id: int | None, episode_number: int | None):
+    parent_folder = (
+        f"{parent_title} ({parent_year})"
+        if parent_year
+        else parent_title
+    )
+
+    special_folder = (
+        f"{anime_title} [mal-{mal_id}]"
+        if mal_id is not None
+        else anime_title
+    )
+
+    episode_number = episode_number or 1
+
+    directory = os.path.join(
+        ANIME_ROOT,
+        parent_folder,
+        ANIME_SPECIALS_FOLDER,
+        special_folder,
+    )
+
+    filename = (
+        f"{anime_title} - S00E{episode_number:02d}"
+    )
+
+    return create_path(directory, filename)
+
+
+def build_series_path(anime_title: str, anime_year: int | None, season_number: int, episode_number: int):
+    folder_title = (
+        f"{anime_title} ({anime_year})"
+        if anime_year
+        else anime_title
+    )
+
+    season = f"{season_number:02d}"
+
+    return create_path(
+        os.path.join(
+            ANIME_ROOT,
+            folder_title,
+            f"Season {season}",
+        ),
+        f"{anime_title} - S{season}E{episode_number:02d}",
+    )
+
+
+def create_path(directory: str, filename: str):
+    os.makedirs(directory, exist_ok=True)
+    return directory, filename
+
+
 async def main(anime_video: str, retries: int = 5):
     """
     Resolve an anime filename using Jikan.
@@ -186,9 +259,20 @@ async def main(anime_video: str, retries: int = 5):
                     or ""
                 ).upper()
 
-                if fmt in ("TV", "ONA"):
+                if fmt in SERIES_FORMATS:
                     series = await build_series(jikan, root)
                     series = series or [root]
+
+                    print("\n=== All Seasons Found ===")
+                    for i, media in enumerate(series, start=1):
+                        print(
+                            f"Season {i:02d}: "
+                            f"{pick_title(media)} | "
+                            f"MAL ID: {media.get('malId') or media.get('id')} | "
+                            f"Episodes: {media.get('episodes')} | "
+                            f"Year: {media.get('seasonYear')}"
+                        )
+                    print("=========================\n")
 
                     root_index = next(
                         (
@@ -208,95 +292,67 @@ async def main(anime_video: str, retries: int = 5):
 
                     base_media = series[0]
 
+                elif fmt in SPECIAL_FORMATS:
+                    series = [root]
+                    actual_season = 0
+                    base_media = root
+                
                 else:
                     series = [root]
                     actual_season = requested_season
                     base_media = root
 
-                anime_title = sanitize(
-                    pick_title(base_media)
-                )
-
+                anime_title = sanitize(pick_title(base_media))
                 anime_year = base_media.get("seasonYear")
 
-                if episode_number is None:
-                    folder_title = (
-                        f"{anime_title} ({anime_year})"
-                        if anime_year
-                        else anime_title
+                if fmt in SPECIAL_FORMATS:
+                    mal_id = root.get("malId") or root.get("id")
+
+                    parent_title, parent_year = await find_first_season_parent(
+                        jikan,
+                        root,
                     )
 
-                    new_directory = os.path.join(
-                        ANIME_MOVIES_ROOT,
-                        folder_title,
+                    if not parent_title:
+                        return build_series_path(
+                            anime_title,
+                            anime_year,
+                            season_index,
+                            episode_index,
+                        )
+
+                    return build_special_path(
+                        parent_title,
+                        parent_year,
+                        anime_title,
+                        mal_id,
+                        episode_number
                     )
 
-                    new_file_name = anime_title
+                elif episode_number is None:
+                    return build_movie_path(
+                        anime_title,
+                        anime_year,
+                    )
 
                 else:
                     rebased_series = rebase_series(
                         series,
                         actual_season,
                     )
-                    
+
                     season_index, episode_index = resolve_episode(
                         rebased_series,
                         episode_number,
                         start_season=actual_season,
                     )
 
-                    anime_season = f"{season_index:02d}"
-
-                    relative_index = (
-                        season_index - actual_season
+                    return build_series_path(
+                        anime_title,
+                        anime_year,
+                        season_index,
+                        episode_index,
                     )
-
-                    episode_count = None
-
-                    if 0 <= relative_index < len(rebased_series):
-                        episode_count = rebased_series[
-                            relative_index
-                        ].get("episodes")
-
-                    if episode_count and episode_count > 0:
-                        width = max(
-                            2,
-                            len(str(int(episode_count))),
-                        )
-                        episode_str = str(
-                            episode_index
-                        ).zfill(width)
-                    else:
-                        episode_str = str(
-                            episode_index
-                        ).zfill(2)
-
-                    folder_title = (
-                        f"{anime_title} ({anime_year})"
-                        if anime_year
-                        else anime_title
-                    )
-
-                    new_directory = os.path.join(
-                        ANIME_ROOT,
-                        folder_title,
-                        f"Season {anime_season}",
-                    )
-
-                    new_file_name = (
-                        f"{anime_title} - "
-                        f"S{anime_season}"
-                        f"E{episode_str}"
-                    )
-
-                os.makedirs(
-                    new_directory,
-                    exist_ok=True,
-                )
-
-                print("Jikan success")
-
-                return new_directory, new_file_name
 
             except NoJikanMatchError as e:
                 print(f"Jikan error: {e}")

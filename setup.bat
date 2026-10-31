@@ -122,10 +122,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM =================================
-REM Return to original directory
-REM =================================
-
 popd
 
 echo.

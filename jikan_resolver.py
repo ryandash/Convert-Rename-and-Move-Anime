@@ -223,7 +223,7 @@ def get_all_titles(media: dict) -> list[str]:
 
 def pick_title(media: dict) -> str:
     titles = media.get("titles") or {}
-    title = titles.get("default") or media.get("title")
+    title = titles.get("default") or titles.get("english")
 
     return sanitize(title) if title else "Unknown"
 
@@ -233,27 +233,6 @@ def format_priority(media: dict) -> int:
         (media.get("format") or "").upper(),
         99,
     )
-
-
-def is_skippable(media: dict) -> bool:
-    fmt = (media.get("format") or "").upper()
-
-    if fmt in SKIP_FORMATS:
-        return True
-
-    if (
-        fmt in {"TV", "ONA"}
-        and media.get("episodes") == 1
-    ):
-        return True
-
-    if fmt not in {"TV", "ONA", "MOVIE"}:
-        title = " ".join(get_all_titles(media)).casefold()
-
-        if re.search(r"\b(?:ova|special)\b", title):
-            return True
-
-    return False
 
 
 def base_series_key(title: str) -> str:
@@ -370,10 +349,9 @@ async def resolve_title(
         if not media.get("malId"):
             continue
 
-        if is_skippable(media):
-            continue
-
         candidates.append(media)
+
+    print(f"Found {len(candidates)} candidates for title '{title}'")
 
     if not candidates:
         return None
@@ -483,7 +461,7 @@ async def _walk_relations(
             else:
                 candidate = await _get_related(jikan, mal_id)
 
-            if candidate and not is_skippable(candidate):
+            if candidate:
                 candidates.append(candidate)
 
         if not candidates:
@@ -563,14 +541,33 @@ async def build_series(
     if tv_series:
         series = tv_series
 
+    # Sort the related entries chronologically.
     series = _sort_series(series)
+
+    # Find the anime that Jikan originally matched.
+    root_id = root_media.get("malId") or root_media.get("id")
+
+    root_index = next(
+        (
+            i
+            for i, media in enumerate(series)
+            if (media.get("malId") or media.get("id")) == root_id
+        ),
+        None,
+    )
+
+    if root_index is not None:
+        # Treat the matched anime as Season 1.
+        # Discard earlier entries
+        series = series[root_index:]
+
     series = _merge_season_parts(series)
 
     result = []
     seen_ids = set()
 
     for media in series:
-        mal_id = media.get("malId")
+        mal_id = media.get("malId") or media.get("id")
 
         if mal_id in seen_ids:
             continue
@@ -585,6 +582,25 @@ async def build_series(
         result.append(media)
 
     return result
+
+
+async def find_first_season_parent(jikan, media):
+    series = await build_series(jikan, media)
+
+    if not series:
+        return None, None
+
+    for season in series:
+        if season.get("format") not in {"TV", "ONA"}:
+            continue
+
+        parent_title = pick_title(season)
+        parent_year = season.get("seasonYear")
+
+        if parent_title and parent_title != "Unknown":
+            return parent_title, parent_year
+
+    return None, None
 
 
 def rebase_series(series: list[dict], start_season: int) -> list[dict]:
