@@ -21,6 +21,8 @@ SKIP_FORMATS = {
     "PV",
 }
 
+DEFAULT_TITLE_KEYS = ("default", "japanese", "english")
+
 SANITIZE_RE = re.compile(r'\s*[<>:"/\\|?*]\s*')
 SPACE_RE = re.compile(r"\s+")
 PUNCT_RE = re.compile(r"""[:!?,.'"`]""")
@@ -205,7 +207,7 @@ def get_all_titles(media: dict) -> list[str]:
 
     result = [
         titles[key]
-        for key in ("default", "japanese", "english")
+        for key in DEFAULT_TITLE_KEYS
         if titles.get(key)
     ]
 
@@ -225,7 +227,10 @@ def pick_title(media: dict) -> str:
     titles = media.get("titles") or {}
     title = titles.get("default") or titles.get("english")
 
-    return sanitize(title) if title else "Unknown"
+    if not title:
+        return "Unknown"
+
+    return sanitize(title)
 
 
 def format_priority(media: dict) -> int:

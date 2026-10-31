@@ -1,10 +1,12 @@
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 import aiohttp
 from jikanpy import AioJikan, exceptions
+
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -17,8 +19,8 @@ class TitleEntry:
 class MinimalAnime:
     malId: int
     type: str
-    titles: List[TitleEntry] = field(default_factory=list)
-    relations: List[dict] = field(default_factory=list)
+    titles: list[TitleEntry] = field(default_factory=list)
+    relations: list[dict[str, Any]] = field(default_factory=list)
     episodes: int = 0
     url: Optional[str] = None
     aired: dict[str, Any] = field(default_factory=dict)
@@ -32,7 +34,7 @@ class TaskLimiterConfiguration:
     ):
         self.max_tasks = max_tasks
         self.period_sec = period_sec
-        self._timestamps: List[float] = []
+        self._timestamps: list[float] = []
 
     async def wait_for_slot(self) -> None:
         now = time.monotonic()
@@ -44,20 +46,15 @@ class TaskLimiterConfiguration:
         ]
 
         if len(self._timestamps) >= self.max_tasks:
-            wait_time = (
-                self.period_sec
-                - (now - self._timestamps[0])
-            )
-            await asyncio.sleep(wait_time)
+            wait_time = self.period_sec - (now - self._timestamps[0])
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
 
         self._timestamps.append(time.monotonic())
 
 
 class TaskLimiter:
-    def __init__(
-        self,
-        configs: List[TaskLimiterConfiguration],
-    ):
+    def __init__(self, configs: list[TaskLimiterConfiguration]):
         self.configs = configs
         self._lock = asyncio.Lock()
 
@@ -75,15 +72,10 @@ class SafeJikan:
     ):
         self.request_delay = request_delay
         self.semaphore = asyncio.Semaphore(max_concurrent)
-
-        # Keep the existing API endpoint.
-        self.aio_jikan = AioJikan(
-            selected_base="https://api.tenrai.org/v1"
-        )
+        self.aio_jikan = AioJikan(selected_base="https://api.tenrai.org/v1")
 
         self._last_request = 0.0
         self._request_lock = asyncio.Lock()
-
         self.limiter = TaskLimiter([
             TaskLimiterConfiguration(3, 1.0),
             TaskLimiterConfiguration(4, 4.0),
@@ -95,11 +87,16 @@ class SafeJikan:
             elapsed = now - self._last_request
 
             if elapsed < self.request_delay:
-                await asyncio.sleep(
-                    self.request_delay - elapsed
-                )
+                await asyncio.sleep(self.request_delay - elapsed)
 
             self._last_request = time.monotonic()
+
+    def _extract_api_code(self, error: Exception) -> Optional[int]:
+        return (
+            getattr(error, "status", None)
+            or getattr(error, "status_code", None)
+            or getattr(error, "code", None)
+        )
 
     async def _retry_on_failure(
         self,
@@ -116,34 +113,23 @@ class SafeJikan:
                 async with self.semaphore:
                     await self.limiter.acquire()
                     await self._wait_for_slot()
-
-                    return await func(
-                        *args,
-                        **kwargs,
-                    )
+                    return await func(*args, **kwargs)
 
             except exceptions.APIException as e:
-                code = (
-                    getattr(e, "status", None)
-                    or getattr(e, "status_code", None)
-                    or getattr(e, "code", None)
-                )
+                code = self._extract_api_code(e)
 
-                if code in (429, 500, 502, 503, 504):
+                if code in RETRYABLE_STATUS_CODES:
                     attempt += 1
-
                     reason = (
                         "Rate limited"
                         if code == 429
                         else f"Server error {code}"
                     )
-
                     print(
                         f"[Jikan] {reason} "
                         f"(attempt {attempt}). "
                         f"Retrying in {delay:.1f}s..."
                     )
-
                     await asyncio.sleep(delay)
                     delay = min(delay * 1.5, max_delay)
 
@@ -167,29 +153,19 @@ class SafeJikan:
                 OSError,
             ) as e:
                 attempt += 1
-
                 print(
                     f"[Jikan] Request error: {e} "
                     f"(attempt {attempt}). "
                     f"Retrying in {delay:.1f}s..."
                 )
-
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, max_delay)
 
     async def anime_list(self, **kwargs) -> dict:
         url = f"{self.aio_jikan.base}/anime"
         session = await self.aio_jikan._get_session()
-
-        response = await session.get(
-            url,
-            params=kwargs,
-        )
-
-        return await self.aio_jikan._wrap_response(
-            response,
-            str(response.url),
-        )
+        response = await session.get(url, params=kwargs)
+        return await self.aio_jikan._wrap_response(response, str(response.url))
 
     async def search_anime(
         self,
@@ -198,53 +174,38 @@ class SafeJikan:
         page: int | None = None,
         limit: int | None = None,
         year: int | str | None = None,
-    ) -> dict:
-        if (query is None):
-            raise ValueError(
-                "search_anime() requires a query parameter."
-            )
+    ) -> dict | None:
+        if query is None:
+            raise ValueError("search_anime() requires a query parameter.")
 
-        if query is not None:
-            query = query.strip()
+        query = query.strip()
+        if len(query) < 3:
+            return None
 
-            if len(query) < 3:
-                return None
+        query = query[:180].rstrip()
 
-            query = query[:180].rstrip()
-
-        params = {}
-
+        params: dict[str, Any] = {}
         if query:
             params["q"] = query
-
         if type_:
             params["type"] = type_
-
         if limit:
             params["limit"] = limit
-
         if page:
             params["page"] = page
-
         if year:
             year = int(year)
             params["start_date"] = f"{year}-01-01"
             params["end_date"] = f"{year}-12-31"
 
-        result = await self._retry_on_failure(
-            self.anime_list,
-            **params,
-        )
-
+        result = await self._retry_on_failure(self.anime_list, **params)
         if not result:
             return None
 
         result["data"] = [
             anime
             for anime in result.get("data", [])
-            if not (
-                anime.get("rating") or ""
-            ).lower().startswith("rx")
+            if not (anime.get("rating") or "").lower().startswith("rx")
         ]
 
         return result
@@ -273,25 +234,21 @@ class SafeJikan:
             if entry.get("title")
         ]
 
-        relations = []
-
+        relations: list[dict[str, Any]] = []
         for relation in node.get("relations", []):
             entries = [
                 entry
                 for entry in relation.get("entry", [])
-                if (
-                    entry.get("type") or ""
-                ).lower() != "manga"
+                if (entry.get("type") or "").lower() != "manga"
             ]
 
             if entries:
-                relations.append({
-                    "relation": relation.get(
-                        "relation",
-                        "",
-                    ),
-                    "entry": entries,
-                })
+                relations.append(
+                    {
+                        "relation": relation.get("relation", ""),
+                        "entry": entries,
+                    }
+                )
 
         return MinimalAnime(
             malId=mal_id,

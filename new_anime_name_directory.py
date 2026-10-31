@@ -122,27 +122,25 @@ def remove_year_from_title(title: str):
     ).strip()
 
 
+def build_folder_title(title: str, year: int | None) -> str:
+    return f"{title} ({year})" if year else title
+
 
 def build_movie_path(anime_title: str, anime_year: int | None):
-    folder_title = (
-        f"{anime_title} ({anime_year})"
-        if anime_year
-        else anime_title
-    )
-
     return create_path(
-        os.path.join(ANIME_MOVIES_ROOT, folder_title),
+        os.path.join(ANIME_MOVIES_ROOT, build_folder_title(anime_title, anime_year)),
         anime_title,
     )
 
 
-def build_special_path(parent_title: str, parent_year: int | None, anime_title: str, mal_id: int | None, episode_number: int | None):
-    parent_folder = (
-        f"{parent_title} ({parent_year})"
-        if parent_year
-        else parent_title
-    )
-
+def build_special_path(
+    parent_title: str,
+    parent_year: int | None,
+    anime_title: str,
+    mal_id: int | None,
+    episode_number: int | None,
+):
+    parent_folder = build_folder_title(parent_title, parent_year)
     special_folder = (
         f"{anime_title} [mal-{mal_id}]"
         if mal_id is not None
@@ -150,34 +148,28 @@ def build_special_path(parent_title: str, parent_year: int | None, anime_title: 
     )
 
     episode_number = episode_number or 1
-
     directory = os.path.join(
         ANIME_ROOT,
         parent_folder,
         ANIME_SPECIALS_FOLDER,
         special_folder,
     )
-
-    filename = (
-        f"{anime_title} - S00E{episode_number:02d}"
-    )
+    filename = f"{anime_title} - S00E{episode_number:02d}"
 
     return create_path(directory, filename)
 
 
-def build_series_path(anime_title: str, anime_year: int | None, season_number: int, episode_number: int):
-    folder_title = (
-        f"{anime_title} ({anime_year})"
-        if anime_year
-        else anime_title
-    )
-
+def build_series_path(
+    anime_title: str,
+    anime_year: int | None,
+    season_number: int,
+    episode_number: int,
+):
     season = f"{season_number:02d}"
-
     return create_path(
         os.path.join(
             ANIME_ROOT,
-            folder_title,
+            build_folder_title(anime_title, anime_year),
             f"Season {season}",
         ),
         f"{anime_title} - S{season}E{episode_number:02d}",
