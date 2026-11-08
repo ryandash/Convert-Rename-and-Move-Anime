@@ -3,6 +3,7 @@ import argparse
 import os
 import re
 import asyncio
+import unicodedata
 
 from safe_jikan import SafeJikan
 
@@ -35,9 +36,9 @@ def fallback_anitopy(anime_video: str):
     parsed = anitopy.parse(os.path.basename(anime_video))
 
     episode_number = parsed.get("episode_number")
-    anime_title = str(
-        parsed.get("anime_title") or "Unknown"
-    ).replace(" - ", " ")
+    anime_title = sanitize_filename(
+        str(parsed.get("anime_title") or "Unknown").replace(" - ", " ")
+    )
 
     anime_year = parsed.get("anime_year")
 
@@ -120,6 +121,26 @@ def remove_year_from_title(title: str):
         "",
         title,
     ).strip()
+
+
+def sanitize_filename(title: str) -> str:
+    """
+    Replace special characters and symbols with spaces.
+    Preserve letters, numbers, and normal filename punctuation.
+    """
+
+    title = unicodedata.normalize("NFKC", str(title))
+
+
+    title = re.sub(r"[^\w\s().-]", " ", title, flags=re.UNICODE)
+
+    # Replace underscores with spaces too.
+    title = title.replace("_", " ")
+
+    # Collapse consecutive spaces.
+    title = re.sub(r"\s+", " ", title)
+
+    return title.strip(" .-")
 
 
 def build_folder_title(title: str, year: int | None) -> str:
@@ -294,7 +315,9 @@ async def main(anime_video: str, retries: int = 5):
                     actual_season = requested_season
                     base_media = root
 
-                anime_title = sanitize(pick_title(base_media))
+                anime_title = sanitize_filename(
+                    sanitize(pick_title(base_media))
+                )
                 anime_year = base_media.get("seasonYear")
 
                 if fmt in SPECIAL_FORMATS:

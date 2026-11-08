@@ -1,45 +1,48 @@
 @echo off
+chcp 65001 >nul
+
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 set "pythonPath=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
 set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
+
 set "file="
 set "filename="
+set "tempOutput="
 set "newDirectory="
 set "newFileName="
 
+REM Check existing lock
 if exist "%LOCKFILE%" (
+    setlocal EnableDelayedExpansion
+
+    REM Get current Unix timestamp
+    for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set "NOW=%%a"
+
+    set "LOCKTIME="
     set /p LOCKTIME=<"%LOCKFILE%"
 
     if not defined LOCKTIME (
+        echo Lockfile is empty. Removing it.
         del "%LOCKFILE%"
-        goto CONTINUE_LOCK
-    )
-
-	setlocal EnableDelayedExpansion
-
-    for /f %%a in ('
-        powershell -NoProfile -Command ^
-        "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - !LOCKTIME!"
-    ') do set ELAPSED=%%a
-	
-    if not defined ELAPSED set ELAPSED=999999
-
-    echo !ELAPSED!
-    if !ELAPSED! LSS 3600 (
-        echo Another encoder instance appears to be running.
-        exit /b
+    ) else (
+        REM Check whether the lock has expired
+        if !NOW! GTR !LOCKTIME! (
+            echo Existing lock has expired. Removing it.
+            del "%LOCKFILE%"
+        ) else (
+            echo Another encoder instance appears to be running.
+            echo Lock expires at Unix timestamp: !LOCKTIME!
+            exit /b 1
+        )
     )
     endlocal
-
-    echo Removing stale lock.
-    del "%LOCKFILE%"
 )
 
-:CONTINUE_LOCK
-
-REM Update lock file with current timestamp
-for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do (
-	echo %%a>"%LOCKFILE%"
+REM Create initial lock: current time + 24 minutes
+for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.AddMinutes(24).ToUnixTimeSeconds()"') do (
+    echo %%a>"%LOCKFILE%"
 )
 
 REM Check if Python is installed, if not install it
@@ -61,8 +64,8 @@ if not exist "%pythonPath%" (
 echo Using Python: %pythonPath%
 
 REM Upgrade pip and install requirements
-%pythonPath% -m pip install --upgrade pip
-%pythonPath% -m pip install -r "%~dp0requirements.txt"
+%pythonPath% -m pip install --upgrade pip -q
+%pythonPath% -m pip install -r "%~dp0requirements.txt" -q
 
 timeout /t 5 /nobreak
 
@@ -108,9 +111,39 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	set "tempOutput=%UserDirectory%\ConvertedVideos"
 	if not exist "!tempOutput!" mkdir "!tempOutput!"
 
-	REM Update lock file with current timestamp
-	for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do (
-		echo %%a>"%LOCKFILE%"
+	REM Get video duration
+	set "VIDEO_LENGTH="
+
+	for /f "delims=" %%a in ('
+		ffprobe -v error -show_entries format^=duration -of default^=nokey^=1:noprint_wrappers^=1 "!file!"
+	') do set "VIDEO_LENGTH=%%a"
+
+	if not defined VIDEO_LENGTH (
+		echo ERROR: Unable to determine video duration.
+		pause
+		exit /b 1
+	)
+
+	REM Calculate lock expiration
+	set "LOCK_EXPIRY="
+
+	for /f "delims=" %%a in ('powershell -NoProfile -Command "$d = [double]::Parse($env:VIDEO_LENGTH, [Globalization.CultureInfo]::InvariantCulture); [DateTimeOffset]::UtcNow.AddSeconds($d + 600).ToUnixTimeSeconds()"') do (
+		set "LOCK_EXPIRY=%%a"
+	)
+
+	REM Validate calculated timestamp
+	if not defined LOCK_EXPIRY (
+		echo ERROR: Failed to calculate lock expiration.
+		pause
+		exit /b 1
+	)
+
+	REM Write expiration timestamp
+	echo(!LOCK_EXPIRY!>"%LOCKFILE%"
+
+	REM Display readable expiration time
+	for /f "delims=" %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::FromUnixTimeSeconds([long]$env:LOCK_EXPIRY).ToLocalTime().ToString()"') do (
+		echo Lock expires: %%a
 	)
 
 	set "encodedVideo=!newDirectory!\!newFileName!.mp4"
@@ -147,7 +180,7 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
 		if "!isVersioned!"=="0" (
-			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
+			call vspipe --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -benchmark -y -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -cq 26 -rc vbr -bf 5 -refs 4 -preset p5 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
 			set "videoExists=1"
 		)
 	)
@@ -198,6 +231,14 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 					ffmpeg -y -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
 
 					pushd "aegisub"
+
+					echo Current directory: %CD%
+					echo Input subtitle: !tempAss!
+					echo Output subtitle: !resampledAss!
+					echo Video: !temporaryVideo!
+
+					if not exist "!tempAss!" echo ERROR: Input ASS missing
+					if not exist "!temporaryVideo!" echo ERROR: Video missing
 
 					REM Resample subtitle to 4k
 					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
