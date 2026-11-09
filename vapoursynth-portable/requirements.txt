@@ -4,4 +4,4 @@ wheel
 cupy-cuda12x
 vsdrba
 vs_tiletools
-vapoursynth-hysteresis
+vapoursynth-scenechange
