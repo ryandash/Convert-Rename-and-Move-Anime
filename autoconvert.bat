@@ -173,8 +173,8 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
 		set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
-		
-		call vspipe.bat --requests 16 --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -hide_banner -loglevel warning -stats -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:format=p010le:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -rc constqp -qp 26 -bf 3 -refs 2 -preset p5 -spatial-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
+
+		call vspipe.bat --requests 12 --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -hide_banner -loglevel warning -stats -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:format=p010le:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -rc vbr -qp 26 -bf 4 -refs 4 -preset p5 -spatial-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
 		set "videoExists=1"
 	) else (
 		set "temporaryVideo=!newDirectory!\!newFileName!.mp4"
