@@ -71,29 +71,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Python location:
-where python
-
-REM =================================
-REM Install PyTorch / Torch-TensorRT
-REM =================================
-
-echo.
-echo Installing PyTorch and Torch-TensorRT...
-
-python -m pip install -U torch torchvision torch_tensorrt ^
-    --index-url https://download.pytorch.org/whl/cu128 ^
-    --extra-index-url https://pypi.nvidia.com ^
-    --no-build-isolation
-
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to install PyTorch/Torch-TensorRT.
-    popd
-    pause
-    exit /b 1
-)
-
 REM =================================
 REM Create required directories
 REM =================================

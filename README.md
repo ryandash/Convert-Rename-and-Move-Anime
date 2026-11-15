@@ -38,6 +38,7 @@ Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, Re
   - [libvs_placebol](https://github.com/Lypheo/vs-placebo/releases)
   - [vs-miscfilter](https://github.com/vapoursynth/vs-miscfilters-obsolete/releases)
 - [FFmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
+- [NVEnc](https://github.com/rigaya/NVEnc/releases)
 - [Python](https://www.python.org/downloads/)
 - Anime4k shaders can be downloaded from repository or directly from [Anime4k](https://github.com/bloc97/Anime4K) (Shaders in repository are the original anime4k shaders merged together into 1 file for each mode for simplicity)
 
@@ -47,9 +48,10 @@ Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, Re
 2. Move autoconvert.bat and new_anime_name_directory.py into Documents folder
 3. Get vapoursynth portable into Documents folder
 4. Get and extract dll files for LSMASHSource and vs-miscfilter into vs-plugins folder (old versions can be found in cloned repo)
-5. Download ffmpeg and extract bin folder contents to vapoursynth-portable folder
-6. Download and install python
-7. Run `Setup.bat`
-8. Add environment path variable UserDirectory=%UserProfile%
-9. Move an anime video into your downloads folder
-10. Run autoconvert.bat
+5. Download ffmpeg and extract bin folder contents into vapoursynth-portable folder
+6. Download NVEncC\_#_x64.7z and extract contents into vapoursynth-portable folder
+7. Download and install python
+8. Run `Setup.bat`
+9. Add environment path variable UserDirectory=%UserProfile%
+10. Move an anime video into your downloads folder
+11. Run autoconvert.bat
