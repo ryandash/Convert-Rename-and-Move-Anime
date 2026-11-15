@@ -70,6 +70,7 @@ timeout /t 5 /nobreak
 
 :start
 pushd "%UserDirectory%\Documents\vapoursynth-portable"
+set "PATH=%CD%;%CD%\lib\site-packages\vapoursynth;%PATH%"
 for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	
 	set "file=%%f"
@@ -155,26 +156,22 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	)
 
 	set "audiocodec="
+	for /f %%a in ('ffprobe -v error -select_streams a:0 -show_entries stream^=codec_name -of default^=nokey^=1:noprint_wrappers^=1 "!file!"') do set "audiocodec=%%a"
 
-	for /f %%a in ('
-		ffprobe -v error -select_streams a:0 ^
-		-show_entries stream^=codec_name ^
-		-of default^=nokey^=1:noprint_wrappers^=1 "!file!"
-	') do set "audiocodec=%%a"
+	set "audiocmd="
+	if /I "!audiocodec!"=="aac" set "audiocmd=--audio-source "!file!":copy"
+	if defined audiocodec if /I not "!audiocodec!"=="aac" set "audiocmd=--audio-source "!file!":codec=aac;bitrate=192"
 
-	echo Audio codec: !audiocodec!
-
-	if /I "!audiocodec!"=="aac" (
-		set "audiocmd=-c:a copy"
-	) else (
-		set "audiocmd=-c:a aac -q:a 3"
-	)
-
-	REM Upscale 4k 48fps and encode to HEVC using NVENC
 	if "!videoExists!"=="0" (
 		set "temporaryVideo=!tempOutput!\!newFileName!.mp4"
+		set "VS_SOURCE=!file!"
+		for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set "ENCODE_START=%%a"
 
-		call vspipe.bat --requests 12 --arg source="!file!" -c y4m "encode 4k 48fps.vpy" - | ffmpeg -y -hide_banner -loglevel warning -stats -init_hw_device "vulkan=vk:0" -filter_hw_device vk -f yuv4mpegpipe -i pipe:0 -i "!file!" -filter:v:0 "libplacebo=w=3840:h=2160:format=p010le:upscaler=ewa_lanczos:force_original_aspect_ratio=decrease:custom_shader_path=shaders/Anime4K_ModeA.glsl" -c:v hevc_nvenc -pix_fmt p010le -rc constqp -qp 26 -bf 4 -refs 4 -preset p5 -spatial-aq 1 -aq-strength 8 -map 0:v:0 -map 1:a:0? !audiocmd! -map_metadata 1 -map_chapters 1 -movflags +faststart -sn "!temporaryVideo!"
+		NVEncC64.exe --vpy-mt -i "encode 4k 48fps.vpy" --vsdir "%CD%" --vpp-libplacebo-shader shader="shaders/Anime4K_ModeA.glsl",res=3840x2160,resampler=libplacebo-ewa-lanczos --output-res 3840x2160,preserve_aspect_ratio=decrease -c hevc --output-depth 10 --qvbr 21 --qp-min 15 --qp-max 27 --preset p4 --tune hq --lookahead 16 --aq --aq-temporal --aq-strength 4 --bframes 4 --bref-mode middle !audiocmd! --metadata copy --chapter-copy -m movflags:+faststart -o "!temporaryVideo!"
+		
+		for /f %%a in ('powershell -NoProfile -Command "$elapsed = [TimeSpan]::FromSeconds([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - !ENCODE_START!); '{0:hh\:mm\:ss}' -f $elapsed"') do set "ENCODE_DURATION=%%a"
+		echo Encode completed in: !ENCODE_DURATION!
+
 		set "videoExists=1"
 	) else (
 		set "temporaryVideo=!newDirectory!\!newFileName!.mp4"
