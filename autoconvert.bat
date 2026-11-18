@@ -1,48 +1,21 @@
 @echo off
 chcp 65001 >nul
 
+if "%~1" neq "--locked" (
+    powershell -NoProfile -Command "$created = $false; $m = New-Object System.Threading.Mutex($true, 'Global\AnimeEncodeMutex', [ref]$created); if (-not $created) { Write-Host 'Another encoder instance is already running. Exiting.'; exit 1 }; $p = Start-Process -FilePath '%~f0' -ArgumentList '--locked' -Wait -NoNewWindow -PassThru; exit $p.ExitCode"
+    exit /b %errorlevel%
+)
+
+if not defined UserDirectory set "UserDirectory=%USERPROFILE%"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
 set "pythonPath=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
-set "LOCKFILE=%UserDirectory%\Documents\AnimeEncode.lock"
 
 set "file="
 set "filename="
 set "newDirectory="
 set "newFileName="
-
-REM Check existing lock
-if exist "%LOCKFILE%" (
-    setlocal EnableDelayedExpansion
-
-    REM Get current Unix timestamp
-    for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set "NOW=%%a"
-
-    set "LOCKTIME="
-    set /p LOCKTIME=<"%LOCKFILE%"
-
-    if not defined LOCKTIME (
-        echo Lockfile is empty. Removing it.
-        del "%LOCKFILE%"
-    ) else (
-        REM Check whether the lock has expired
-        if !NOW! GTR !LOCKTIME! (
-            echo Existing lock has expired. Removing it.
-            del "%LOCKFILE%"
-        ) else (
-            echo Another encoder instance appears to be running.
-            echo Lock expires at Unix timestamp: !LOCKTIME!
-            exit /b 1
-        )
-    )
-    endlocal
-)
-
-REM Create initial lock: current time + 24 minutes
-for /f %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.AddMinutes(24).ToUnixTimeSeconds()"') do (
-    echo %%a>"%LOCKFILE%"
-)
 
 REM Check if Python is installed, if not install it
 if not exist "%pythonPath%" (
@@ -97,14 +70,12 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 	if "!newDirectory!"=="" (
 		echo Failed to find filename.
 		pause
-		del "%LOCKFILE%"
 		exit /b 1
 	)
 
 	if "!newFileName!"=="" (
 		echo Failed to find filename.
 		pause
-		del "%LOCKFILE%"
 		exit /b 1
 	)
 
@@ -122,28 +93,6 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		echo ERROR: Unable to determine video duration.
 		pause
 		exit /b 1
-	)
-
-	REM Calculate lock expiration
-	set "LOCK_EXPIRY="
-
-	for /f "delims=" %%a in ('powershell -NoProfile -Command "$d = [double]::Parse($env:VIDEO_LENGTH, [Globalization.CultureInfo]::InvariantCulture); [DateTimeOffset]::UtcNow.AddSeconds($d + 600).ToUnixTimeSeconds()"') do (
-		set "LOCK_EXPIRY=%%a"
-	)
-
-	REM Validate calculated timestamp
-	if not defined LOCK_EXPIRY (
-		echo ERROR: Failed to calculate lock expiration.
-		pause
-		exit /b 1
-	)
-
-	REM Write expiration timestamp
-	echo(!LOCK_EXPIRY!>"%LOCKFILE%"
-
-	REM Display readable expiration time
-	for /f "delims=" %%a in ('powershell -NoProfile -Command "[DateTimeOffset]::FromUnixTimeSeconds([long]$env:LOCK_EXPIRY).ToLocalTime().ToString()"') do (
-		echo Lock expires: %%a
 	)
 
 	set "encodedVideo=!newDirectory!\!newFileName!.mp4"
@@ -287,5 +236,3 @@ for /f "delims=" %%d in ('dir /ad /s /b ^| sort /R') do rd "%%d" 2>nul
 if exist "%UserDirectory%\Downloads\*.mkv" (
 	goto start
 )
-
-del "%LOCKFILE%"
