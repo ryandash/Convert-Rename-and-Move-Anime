@@ -18,7 +18,7 @@ Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, Re
     [Anime Folder]
         [Season]
             [anime mp4 file]
-    		[anime subtitle files]
+    	[anime subtitle files]
 
 ---
 
