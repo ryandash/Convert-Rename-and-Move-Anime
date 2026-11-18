@@ -1,6 +1,6 @@
 # Convert-and-Move-Anime
 
-Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, Renaming the anime using AniList search results and moving the anime into proper subfolders to allow Plex or Jellyfin to auto add the anime.
+Interoplate anime to 48fps using rife and upscale anime to 4k in vapoursynth, Renaming the anime using MyAnimeList search results and moving the anime into proper subfolders to allow Plex or Jellyfin to auto add the anime.
 
 ## Script autoconvert.bat
 
