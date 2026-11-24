@@ -1,9 +1,6 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$OriginalSubtitles,
-
-    [Parameter(Mandatory = $true)]
     [string]$ResampledSubtitles,
 
     [Parameter(Mandatory = $true)]
@@ -25,25 +22,9 @@ $ErrorActionPreference = "Stop"
 
 $Config = Join-Path $PSScriptRoot "unscale-tags.txt"
 
-# Map renamed styles to their original style names.
-# Edit these mappings if your style naming changes.
-
-$StyleAliases = @{
-    "main"              = "Internal"
-    "top"               = "Overlap top"
-    "italics"           = "Internal"
-    "italicstop"        = "Overlap top"
-    "flashback"         = "Flashback"
-    "flashback italics" = "Flashback"
-}
-
 # ------------------------------------------------------------
 # Check files
 # ------------------------------------------------------------
-
-if (-not (Test-Path -LiteralPath $OriginalSubtitles)) {
-    throw "Original subtitle file not found: $OriginalSubtitles"
-}
 
 if (-not (Test-Path -LiteralPath $ResampledSubtitles)) {
     throw "Resampled subtitle file not found: $ResampledSubtitles"
@@ -239,51 +220,9 @@ Write-Host "Scale X       : $ScaleX"
 Write-Host "Scale Y       : $ScaleY"
 
 # ------------------------------------------------------------
-# Load original style definitions
-#
-# ASS style field positions:
-#
-# 16 = Outline
-# 17 = Shadow
-#
+# Unscale style-level Outline and Shadow
 # ------------------------------------------------------------
 
-Write-Host ""
-Write-Host "Loading original style definitions..." -ForegroundColor Cyan
-
-$OriginalStyles = @{}
-
-$OriginalLines = Get-Content `
-    -LiteralPath $OriginalSubtitles `
-    -Encoding UTF8
-
-foreach ($Line in $OriginalLines) {
-
-    if ($Line -notmatch '^\s*Style\s*:') {
-        continue
-    }
-
-    $Fields = $Line -split ','
-
-    if ($Fields.Count -lt 18) {
-        continue
-    }
-
-    $StyleName = ($Fields[0] -replace '^\s*Style\s*:\s*', '').Trim()
-
-    $OriginalStyles[$StyleName.ToLowerInvariant()] = @{
-        Outline = $Fields[16].Trim()
-        Shadow  = $Fields[17].Trim()
-    }
-}
-
-if ($OriginalStyles.Count -eq 0) {
-    throw "No original ASS styles were found."
-}
-
-# ------------------------------------------------------------
-# Restore style-level Outline and Shadow
-# ------------------------------------------------------------
 
 function Process-StyleLine {
     param(
@@ -302,71 +241,41 @@ function Process-StyleLine {
 
     $StyleName = ($Fields[0] -replace '^\s*Style\s*:\s*', '').Trim()
 
-    $LookupName = $StyleName.ToLowerInvariant()
+    $Outline = 0.0
+    $Shadow = 0.0
 
-    # Apply renamed style mapping.
+    $OutlineParsed = [double]::TryParse(
+        $Fields[16].Trim(),
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$Outline
+    )
 
-    if ($script:StyleAliases.ContainsKey($LookupName)) {
-        $LookupName = $script:StyleAliases[$LookupName].ToLowerInvariant()
+    $ShadowParsed = [double]::TryParse(
+        $Fields[17].Trim(),
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$Shadow
+    )
+
+    if ($OutlineParsed) {
+        $Fields[16] = Format-AssNumber ($Outline / $script:ScaleX)
     }
 
-    # Restore exact original values when a matching style exists.
-
-    if ($script:OriginalStyles.ContainsKey($LookupName)) {
-
-        $OriginalStyle = $script:OriginalStyles[$LookupName]
-
-        $Fields[16] = $OriginalStyle.Outline
-        $Fields[17] = $OriginalStyle.Shadow
-
-        Write-Host (
-            "  Restored style: {0} (Outline={1}, Shadow={2})" -f
-            $StyleName,
-            $Fields[16],
-            $Fields[17]
-        ) -ForegroundColor Green
-
+    if ($ShadowParsed) {
+        $Fields[17] = Format-AssNumber ($Shadow / $script:ScaleX)
     }
-    else {
 
-        # Generated or unmatched styles:
-        # Reverse the resampling scale.
-
-        $Outline = 0.0
-        $Shadow = 0.0
-
-        $OutlineParsed = [double]::TryParse(
-            $Fields[16].Trim(),
-            [System.Globalization.NumberStyles]::Float,
-            [System.Globalization.CultureInfo]::InvariantCulture,
-            [ref]$Outline
-        )
-
-        $ShadowParsed = [double]::TryParse(
-            $Fields[17].Trim(),
-            [System.Globalization.NumberStyles]::Float,
-            [System.Globalization.CultureInfo]::InvariantCulture,
-            [ref]$Shadow
-        )
-
-        if ($OutlineParsed) {
-            $Fields[16] = Format-AssNumber ($Outline / $script:ScaleX)
-        }
-
-        if ($ShadowParsed) {
-            $Fields[17] = Format-AssNumber ($Shadow / $script:ScaleX)
-        }
-
-        Write-Host (
-            "  Unscaled generated style: {0} (Outline={1}, Shadow={2})" -f
-            $StyleName,
-            $Fields[16],
-            $Fields[17]
-        ) -ForegroundColor Yellow
-    }
+    Write-Host (
+        "  Unscaled style: {0} (Outline={1}, Shadow={2})" -f
+        $StyleName,
+        $Fields[16],
+        $Fields[17]
+    ) -ForegroundColor Yellow
 
     return ($Fields -join ',')
 }
+
 
 # ------------------------------------------------------------
 # ASS override tag pattern
@@ -452,7 +361,7 @@ function Process-AssLine {
         return $Line
     }
 
-    # Restore style-level Outline and Shadow.
+    # Unscale style-level Outline and Shadow.
 
     if ($Line -match '^\s*Style\s*:') {
         return Process-StyleLine $Line
@@ -483,7 +392,7 @@ $Lines = Get-Content `
     -Encoding UTF8
 
 Write-Host ""
-Write-Host "Restoring style Outline and Shadow..." -ForegroundColor Cyan
+Write-Host "Unscaling style Outline and Shadow..." -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Correcting configured override tags..." -ForegroundColor Cyan
@@ -521,7 +430,7 @@ Write-Host "Original Video:" $OriginalWidth "x" $OriginalHeight
 Write-Host "Resampled ASS :" $ResampledWidth "x" $ResampledHeight
 
 Write-Host ""
-Write-Host "Restored style properties:"
+Write-Host "Unscaled style properties:"
 Write-Host "  Outline"
 Write-Host "  Shadow"
 
