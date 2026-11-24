@@ -4,8 +4,17 @@ param(
     [string]$OriginalSubtitles,
 
     [Parameter(Mandatory = $true)]
-    [string]$ResampledSubtitles
+    [string]$ResampledSubtitles,
+
+    [Parameter(Mandatory = $true)]
+    [string]$OriginalVideo
 )
+
+$FFprobePath = Join-Path $env:UserDirectory "Documents\vapoursynth-portable\ffprobe.exe"
+
+if (-not (Test-Path -LiteralPath $FFprobePath)) {
+    throw "ffprobe.exe not found: $FFprobePath"
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -42,6 +51,54 @@ if (-not (Test-Path -LiteralPath $ResampledSubtitles)) {
 
 if (-not (Test-Path -LiteralPath $Config)) {
     throw "Configuration file not found: $Config"
+}
+
+# ------------------------------------------------------------
+# Get original video resolution using ffprobe
+# ------------------------------------------------------------
+
+function Get-VideoResolution {
+    param(
+        [string]$VideoFile
+    )
+
+    if (-not (Test-Path -LiteralPath $VideoFile)) {
+        throw "Original video not found: $VideoFile"
+    }
+
+    $ProbeOutput = & $FFprobePath `
+        -v error `
+        -select_streams v:0 `
+        -show_entries stream=width,height `
+        -of json `
+        $VideoFile
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "ffprobe failed to determine video resolution: $VideoFile"
+    }
+
+    try {
+        $VideoInfo = $ProbeOutput | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Unable to parse ffprobe output for: $VideoFile"
+    }
+
+    if ($null -eq $VideoInfo.streams -or $VideoInfo.streams.Count -eq 0) {
+        throw "No video stream found: $VideoFile"
+    }
+
+    $Width = [double]$VideoInfo.streams[0].width
+    $Height = [double]$VideoInfo.streams[0].height
+
+    if ($Width -le 0 -or $Height -le 0) {
+        throw "Invalid video resolution: $VideoFile"
+    }
+
+    return @{
+        Width  = $Width
+        Height = $Height
+    }
 }
 
 # ------------------------------------------------------------
@@ -162,9 +219,9 @@ if ($Tags.Count -eq 0) {
 # ------------------------------------------------------------
 
 Write-Host ""
-Write-Host "Determining ASS resolutions..." -ForegroundColor Cyan
+Write-Host "Determining resolutions..." -ForegroundColor Cyan
 
-$Original = Get-AssResolution $OriginalSubtitles
+$Original = Get-VideoResolution $OriginalVideo
 $Resampled = Get-AssResolution $ResampledSubtitles
 
 $OriginalWidth = $Original.Width
@@ -176,10 +233,10 @@ $ResampledHeight = $Resampled.Height
 $ScaleX = $ResampledWidth / $OriginalWidth
 $ScaleY = $ResampledHeight / $OriginalHeight
 
-Write-Host "Original ASS : $OriginalWidth x $OriginalHeight"
-Write-Host "Resampled ASS: $ResampledWidth x $ResampledHeight"
-Write-Host "Scale X      : $ScaleX"
-Write-Host "Scale Y      : $ScaleY"
+Write-Host "Original Video: $OriginalWidth x $OriginalHeight"
+Write-Host "Resampled ASS : $ResampledWidth x $ResampledHeight"
+Write-Host "Scale X       : $ScaleX"
+Write-Host "Scale Y       : $ScaleY"
 
 # ------------------------------------------------------------
 # Load original style definitions
@@ -460,8 +517,8 @@ Write-Host "ASS scaling correction complete" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "Original ASS :" $OriginalWidth "x" $OriginalHeight
-Write-Host "Resampled ASS:" $ResampledWidth "x" $ResampledHeight
+Write-Host "Original Video:" $OriginalWidth "x" $OriginalHeight
+Write-Host "Resampled ASS :" $ResampledWidth "x" $ResampledHeight
 
 Write-Host ""
 Write-Host "Restored style properties:"

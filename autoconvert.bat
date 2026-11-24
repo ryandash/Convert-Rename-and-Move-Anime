@@ -130,97 +130,82 @@ for /r "%UserDirectory%\Downloads\" %%f in (*.mkv) do (
 		REM Extract all subtitles
 		set "counter=0"
 		
-		for /f "tokens=1,2,3 delims=," %%a in ('ffprobe -loglevel error -select_streams s -show_entries stream^=index^,codec_name:stream_tags^=language -of csv^=p^=0 "!file!"') do (
+		for /f "tokens=1-3 delims=|" %%a in ('powershell -NoProfile -Command "$j = ffprobe -v error -select_streams s -show_entries stream=index,codec_name:stream_tags=language,title -of json '!file!' | ConvertFrom-Json; foreach ($s in $j.streams) { $lang = $s.tags.language; $title = $s.tags.title; if ($lang -match '^(?i:eng|en)$' -or $title -match '^(?i:English)(?:$|[ (])') { Write-Output ('{0}|{1}|eng' -f $s.index,$s.codec_name) } }"') do (
+
 			set "sub_index=%%a"
 			set "codec=%%b"
 			set "lang=%%c"
 
-			if /I "!lang!"=="eng" (
-				
-				set "langFull=default.eng"
+			set "langFull=default.eng"
 
-				REM Set extension and codec option
+			REM Set extension and codec option
+			set "codec_arg=-c:s copy"
 
-				set "codec_arg=-c:s copy"
-				if /I "!codec!"=="hdmv_pgs_subtitle" (
-					set "ext=sup"
-				) else if /I "!codec!"=="dvd_subtitle" (
-					set "ext=sub"
-				) else if /I "!codec!"=="dvb_subtitle" (
-					set "ext=sub"
-				) else if /I "!codec!"=="xsub" (
-					set "ext=sub"
-				) else (
-					set "ext=ass"
-					set "codec_arg=-c:s ass"
-				)
-
-				set "outfile=!newDirectory!\!newFileName!.!langFull!.!counter!.!ext!"
-
-				REM Extract subtitle
-				if /I "!ext!"=="ass" (
-
-					REM Intermediate files stay in tempOutput
-					
-					set "tempAss=!tempOutput!\!newFileName!.subtitle.!counter!.tmp.ass"
-					set "resampledAss=!tempOutput!\!newFileName!.subtitle.!counter!.resampled.ass"
-
-					echo Extracting ASS subtitle...
-					echo Temporary: !tempAss!
-
-					REM Extract subtitle to temporary location
-					ffmpeg -y -hide_banner -loglevel warning -stats -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
-
-					pushd "aegisub"
-
-					echo Current directory: %CD%
-					echo Input subtitle: !tempAss!
-					echo Output subtitle: !resampledAss!
-					echo Video: !temporaryVideo!
-
-					if not exist "!tempAss!" echo ERROR: Input ASS missing
-					if not exist "!temporaryVideo!" echo ERROR: Video missing
-
-					REM Resample subtitle to 4k
-					aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
-
-					if exist "!resampledAss!" (
-						echo SUCCESS - output created
-
-						REM Downscale some override tags in ASS subtitle and convert to UTF-8 with BOM...
-						powershell -NoProfile -ExecutionPolicy Bypass -File "Fix-AssScaling.ps1" -OriginalSubtitles "!tempAss!" -ResampledSubtitles "!resampledAss!"
-					) else (
-						echo FAILED - output missing
-						pause
-					)
-
-					popd
-
-					REM Move resampled subtitle to final location
-					if exist "!resampledAss!" (
-						move /Y "!resampledAss!" "!outfile!"
-					) else (
-						echo ERROR: resampling failed.
-						pause
-						echo Copying original ASS instead.
-						move /Y "!tempAss!" "!outfile!"
-					)
-
-					REM Cleanup temporary ASS
-					del "!tempAss!" 2>nul
-					del "!resampledAss!" 2>nul
-
-				) else (
-					ffmpeg -y -hide_banner -loglevel warning -stats -i "!file!" -map 0:!sub_index! !codec_arg! "!outfile!"
-				)
-
-				set /a "counter+=1"
+			if /I "!codec!"=="hdmv_pgs_subtitle" (
+				set "ext=sup"
+			) else if /I "!codec!"=="dvd_subtitle" (
+				set "ext=sub"
+			) else if /I "!codec!"=="dvb_subtitle" (
+				set "ext=sub"
+			) else if /I "!codec!"=="xsub" (
+				set "ext=sub"
+			) else (
+				set "ext=ass"
+				set "codec_arg=-c:s ass"
 			)
+
+			set "outfile=!newDirectory!\!newFileName!.!langFull!.!counter!.!ext!"
+
+			REM Extract subtitle
+			if /I "!ext!"=="ass" (
+
+				set "tempAss=!tempOutput!\!newFileName!.subtitle.!counter!.tmp.ass"
+				set "resampledAss=!tempOutput!\!newFileName!.subtitle.!counter!.resampled.ass"
+
+				echo Extracting English ASS subtitle...
+				echo Subtitle stream: !sub_index!
+
+				ffmpeg -y -hide_banner -loglevel warning -stats -i "!file!" -map 0:!sub_index! -c:s ass "!tempAss!"
+
+				pushd "aegisub"
+
+				aegisub-cli "!tempAss!" "!resampledAss!" tool/resampleres --video "!temporaryVideo!"
+
+				if exist "!resampledAss!" (
+					powershell -NoProfile -ExecutionPolicy Bypass -File "Fix-AssScaling.ps1" -OriginalSubtitles "!tempAss!" -ResampledSubtitles "!resampledAss!" -OriginalVideo "!file!"
+				) else (
+					echo ERROR: Subtitle resampling failed.
+					pause
+					exit /b 1
+				)
+
+				popd
+
+				if exist "!resampledAss!" (
+					move /Y "!resampledAss!" "!outfile!"
+				) else (
+					echo ERROR: Resampled subtitle missing.
+					pause
+					exit /b 1
+				)
+
+				del "!tempAss!" 2>nul
+				del "!resampledAss!" 2>nul
+
+			) else (
+				ffmpeg -y -hide_banner -loglevel warning -stats -i "!file!" -map 0:!sub_index! !codec_arg! "!outfile!"
+			)
+
+			set /a counter+=1
 		)
+
 	)
 
 	if exist "!temporaryVideo!" (
 		move /Y "!temporaryVideo!" "!encodedVideo!"
+	) else (
+		echo ERROR: Temporary video file not found. Encoding may have failed.
+		pause
 	)
 	
 	del "!file!" /q /s
