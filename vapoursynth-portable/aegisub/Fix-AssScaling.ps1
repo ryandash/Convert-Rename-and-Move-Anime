@@ -1,3 +1,4 @@
+
 param(
     [Parameter(Mandatory = $true)]
     [string]$OriginalSubtitles,
@@ -14,6 +15,18 @@ $ErrorActionPreference = "Stop"
 # ------------------------------------------------------------
 
 $Config = Join-Path $PSScriptRoot "unscale-tags.txt"
+
+# Map renamed styles to their original style names.
+# Edit these mappings if your style naming changes.
+
+$StyleAliases = @{
+    "main"              = "Internal"
+    "top"               = "Overlap top"
+    "italics"           = "Internal"
+    "italicstop"        = "Overlap top"
+    "flashback"         = "Flashback"
+    "flashback italics" = "Flashback"
+}
 
 # ------------------------------------------------------------
 # Check files
@@ -32,29 +45,24 @@ if (-not (Test-Path -LiteralPath $Config)) {
 }
 
 # ------------------------------------------------------------
-# Get ASS PlayResX / PlayResY
+# Get ASS resolution
 # ------------------------------------------------------------
 
 function Get-AssResolution {
     param(
-        [Parameter(Mandatory = $true)]
         [string]$SubtitleFile
     )
 
     $PlayResX = $null
     $PlayResY = $null
 
-    # Read the file as text.
-    #
-    # UTF8 detection is handled by .NET when a BOM is present.
-    $Lines = Get-Content `
-        -LiteralPath $SubtitleFile `
-        -Encoding UTF8
+    $Lines = Get-Content -LiteralPath $SubtitleFile -Encoding UTF8
 
     foreach ($Line in $Lines) {
 
-        # Stop once we reach the first section after [Script Info]
-        if ($Line -match '^\s*\[' -and $Line -notmatch '^\s*\[\s*Script Info\s*\]\s*$') {
+        if ($Line -match '^\s*\[' -and
+            $Line -notmatch '^\s*\[\s*Script Info\s*\]\s*$') {
+
             if ($null -ne $PlayResX -and $null -ne $PlayResY) {
                 break
             }
@@ -69,12 +77,8 @@ function Get-AssResolution {
         }
     }
 
-    if ($null -eq $PlayResX) {
-        throw "PlayResX was not found in: $SubtitleFile"
-    }
-
-    if ($null -eq $PlayResY) {
-        throw "PlayResY was not found in: $SubtitleFile"
+    if ($null -eq $PlayResX -or $null -eq $PlayResY) {
+        throw "Unable to determine PlayResX / PlayResY: $SubtitleFile"
     }
 
     return @{
@@ -95,7 +99,8 @@ function Format-AssNumber {
     $Value = [Math]::Round($Value, 6)
 
     if ($Value -eq [Math]::Truncate($Value)) {
-        return ([int]$Value).ToString(
+        return $Value.ToString(
+            "0",
             [System.Globalization.CultureInfo]::InvariantCulture
         )
     }
@@ -107,23 +112,7 @@ function Format-AssNumber {
 }
 
 # ------------------------------------------------------------
-# Load configuration
-#
-# Example:
-#
-# bord uniform
-# xbord x
-# ybord y
-# shad uniform
-# blur uniform
-#
-# Valid modes:
-#
-# uniform
-# x
-# y
-#
-# If no mode is specified, uniform is assumed.
+# Load tag configuration
 # ------------------------------------------------------------
 
 Write-Host ""
@@ -135,12 +124,10 @@ foreach ($Line in Get-Content -LiteralPath $Config -Encoding UTF8) {
 
     $Line = $Line.Trim()
 
-    # Ignore blank lines
     if ([string]::IsNullOrWhiteSpace($Line)) {
         continue
     }
 
-    # Ignore comments
     if ($Line.StartsWith("#")) {
         continue
     }
@@ -160,7 +147,7 @@ foreach ($Line in Get-Content -LiteralPath $Config -Encoding UTF8) {
     }
 
     if ($Mode -notin @("uniform", "x", "y")) {
-        throw "Invalid scaling mode '$Mode' for tag '$Tag'. Valid modes are: uniform, x, y."
+        throw "Invalid scaling mode '$Mode' for tag '$Tag'."
     }
 
     $Tags[$Tag.ToLowerInvariant()] = $Mode
@@ -171,7 +158,7 @@ if ($Tags.Count -eq 0) {
 }
 
 # ------------------------------------------------------------
-# Determine ASS resolutions
+# Determine resolutions
 # ------------------------------------------------------------
 
 Write-Host ""
@@ -193,30 +180,145 @@ Write-Host "Original ASS : $OriginalWidth x $OriginalHeight"
 Write-Host "Resampled ASS: $ResampledWidth x $ResampledHeight"
 Write-Host "Scale X      : $ScaleX"
 Write-Host "Scale Y      : $ScaleY"
-Write-Host ""
 
 # ------------------------------------------------------------
-# ASS numeric tag pattern
+# Load original style definitions
 #
-# Matches:
+# ASS style field positions:
 #
-# \bord3672
-# \xbord3672
-# \blur48
-# \shad20
-# \fsp12
+# 16 = Outline
+# 17 = Shadow
 #
-# Does not match:
-#
-# \pos(1920,1080)
-# \move(...)
-#
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "Loading original style definitions..." -ForegroundColor Cyan
+
+$OriginalStyles = @{}
+
+$OriginalLines = Get-Content `
+    -LiteralPath $OriginalSubtitles `
+    -Encoding UTF8
+
+foreach ($Line in $OriginalLines) {
+
+    if ($Line -notmatch '^\s*Style\s*:') {
+        continue
+    }
+
+    $Fields = $Line -split ','
+
+    if ($Fields.Count -lt 18) {
+        continue
+    }
+
+    $StyleName = ($Fields[0] -replace '^\s*Style\s*:\s*', '').Trim()
+
+    $OriginalStyles[$StyleName.ToLowerInvariant()] = @{
+        Outline = $Fields[16].Trim()
+        Shadow  = $Fields[17].Trim()
+    }
+}
+
+if ($OriginalStyles.Count -eq 0) {
+    throw "No original ASS styles were found."
+}
+
+# ------------------------------------------------------------
+# Restore style-level Outline and Shadow
+# ------------------------------------------------------------
+
+function Process-StyleLine {
+    param(
+        [string]$Line
+    )
+
+    if ($Line -notmatch '^\s*Style\s*:') {
+        return $Line
+    }
+
+    $Fields = $Line -split ','
+
+    if ($Fields.Count -lt 18) {
+        return $Line
+    }
+
+    $StyleName = ($Fields[0] -replace '^\s*Style\s*:\s*', '').Trim()
+
+    $LookupName = $StyleName.ToLowerInvariant()
+
+    # Apply renamed style mapping.
+
+    if ($script:StyleAliases.ContainsKey($LookupName)) {
+        $LookupName = $script:StyleAliases[$LookupName].ToLowerInvariant()
+    }
+
+    # Restore exact original values when a matching style exists.
+
+    if ($script:OriginalStyles.ContainsKey($LookupName)) {
+
+        $OriginalStyle = $script:OriginalStyles[$LookupName]
+
+        $Fields[16] = $OriginalStyle.Outline
+        $Fields[17] = $OriginalStyle.Shadow
+
+        Write-Host (
+            "  Restored style: {0} (Outline={1}, Shadow={2})" -f
+            $StyleName,
+            $Fields[16],
+            $Fields[17]
+        ) -ForegroundColor Green
+
+    }
+    else {
+
+        # Generated or unmatched styles:
+        # Reverse the resampling scale.
+
+        $Outline = 0.0
+        $Shadow = 0.0
+
+        $OutlineParsed = [double]::TryParse(
+            $Fields[16].Trim(),
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$Outline
+        )
+
+        $ShadowParsed = [double]::TryParse(
+            $Fields[17].Trim(),
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$Shadow
+        )
+
+        if ($OutlineParsed) {
+            $Fields[16] = Format-AssNumber ($Outline / $script:ScaleX)
+        }
+
+        if ($ShadowParsed) {
+            $Fields[17] = Format-AssNumber ($Shadow / $script:ScaleX)
+        }
+
+        Write-Host (
+            "  Unscaled generated style: {0} (Outline={1}, Shadow={2})" -f
+            $StyleName,
+            $Fields[16],
+            $Fields[17]
+        ) -ForegroundColor Yellow
+    }
+
+    return ($Fields -join ',')
+}
+
+# ------------------------------------------------------------
+# ASS override tag pattern
 # ------------------------------------------------------------
 
 $TagPattern = '\\([a-zA-Z]+)([-+]?(?:\d+(?:\.\d*)?|\.\d+))'
 
 # ------------------------------------------------------------
-# Process an ASS override block
+# Process override blocks
 # ------------------------------------------------------------
 
 function Process-OverrideBlock {
@@ -227,7 +329,7 @@ function Process-OverrideBlock {
 
     return [regex]::Replace(
         $Block,
-        $TagPattern,
+        $script:TagPattern,
         {
             param($Match)
 
@@ -236,8 +338,7 @@ function Process-OverrideBlock {
 
             $TagKey = $TagName.ToLowerInvariant()
 
-            # Not configured -> leave unchanged
-            if (-not $Tags.ContainsKey($TagKey)) {
+            if (-not $script:Tags.ContainsKey($TagKey)) {
                 return $Match.Value
             }
 
@@ -254,31 +355,20 @@ function Process-OverrideBlock {
                 return $Match.Value
             }
 
-            $Mode = $Tags[$TagKey]
+            $Mode = $script:Tags[$TagKey]
 
             switch ($Mode) {
 
                 "x" {
-                    $NewValue = $Value / $ScaleX
+                    $NewValue = $Value / $script:ScaleX
                 }
 
                 "y" {
-                    $NewValue = $Value / $ScaleY
+                    $NewValue = $Value / $script:ScaleY
                 }
 
                 "uniform" {
-
-                    # Uniform tags such as:
-                    #
-                    # \bord
-                    # \shad
-                    # \blur
-                    #
-                    # Ideally ScaleX and ScaleY are identical.
-                    #
-                    # Use X if they differ.
-
-                    $NewValue = $Value / $ScaleX
+                    $NewValue = $Value / $script:ScaleX
                 }
 
                 default {
@@ -292,7 +382,7 @@ function Process-OverrideBlock {
 }
 
 # ------------------------------------------------------------
-# Process an ASS line
+# Process ASS line
 # ------------------------------------------------------------
 
 function Process-AssLine {
@@ -301,10 +391,17 @@ function Process-AssLine {
         [string]$Line
     )
 
-    # Empty line
     if ([string]::IsNullOrEmpty($Line)) {
         return $Line
     }
+
+    # Restore style-level Outline and Shadow.
+
+    if ($Line -match '^\s*Style\s*:') {
+        return Process-StyleLine $Line
+    }
+
+    # Correct dialogue override tags.
 
     return [regex]::Replace(
         $Line,
@@ -318,19 +415,20 @@ function Process-AssLine {
 }
 
 # ------------------------------------------------------------
-# Read resampled ASS
+# Process resampled subtitle
 # ------------------------------------------------------------
 
+Write-Host ""
 Write-Host "Reading resampled subtitle..." -ForegroundColor Cyan
 
 $Lines = Get-Content `
     -LiteralPath $ResampledSubtitles `
     -Encoding UTF8
 
-# ------------------------------------------------------------
-# Process ASS
-# ------------------------------------------------------------
+Write-Host ""
+Write-Host "Restoring style Outline and Shadow..." -ForegroundColor Cyan
 
+Write-Host ""
 Write-Host "Correcting configured override tags..." -ForegroundColor Cyan
 
 $ProcessedLines = foreach ($Line in $Lines) {
@@ -341,13 +439,14 @@ $ProcessedLines = foreach ($Line in $Lines) {
 # Write UTF-8 with BOM
 # ------------------------------------------------------------
 
-Write-Host "Writing UTF-8 BOM subtitle..." -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Writing corrected subtitle..." -ForegroundColor Cyan
 
 $Utf8Bom = New-Object System.Text.UTF8Encoding($true)
 
 [System.IO.File]::WriteAllLines(
     $ResampledSubtitles,
-    $ProcessedLines,
+    [string[]]$ProcessedLines,
     $Utf8Bom
 )
 
@@ -359,22 +458,18 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "ASS scaling correction complete" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host ""
-
-Write-Host "Original ASS :" -NoNewline
-Write-Host " $OriginalWidth x $OriginalHeight"
-
-Write-Host "Resampled ASS:" -NoNewline
-Write-Host " $ResampledWidth x $ResampledHeight"
-
-Write-Host "Scale X      :" -NoNewline
-Write-Host " $ScaleX"
-
-Write-Host "Scale Y      :" -NoNewline
-Write-Host " $ScaleY"
 
 Write-Host ""
-Write-Host "Corrected tags:" -ForegroundColor Yellow
+Write-Host "Original ASS :" $OriginalWidth "x" $OriginalHeight
+Write-Host "Resampled ASS:" $ResampledWidth "x" $ResampledHeight
+
+Write-Host ""
+Write-Host "Restored style properties:"
+Write-Host "  Outline"
+Write-Host "  Shadow"
+
+Write-Host ""
+Write-Host "Corrected override tags:"
 
 foreach ($Entry in $Tags.GetEnumerator()) {
     Write-Host ("  \{0} ({1})" -f $Entry.Key, $Entry.Value)
