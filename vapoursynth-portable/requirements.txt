@@ -15,6 +15,6 @@ torch-tensorrt
 cupy-cuda13x
 
 # VapourSynth Plugins & Tools
-vsdrba==1.0.2
+vsdrba
 vs_tiletools
 vapoursynth-scenechange
