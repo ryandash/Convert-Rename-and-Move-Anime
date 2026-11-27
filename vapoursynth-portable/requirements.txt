@@ -7,13 +7,13 @@ packaging
 setuptools
 wheel
 
-# PyTorch & TensorRT-RTX Nightly Stack
+# PyTorch & TensorRT-RTX Nightly Stack (CUDA 13.2)
 torch
 torchvision
 torch_tensorrt_rtx
-cupy-cuda12x
+cupy-cuda13x
 
 # VapourSynth Plugins & Tools
-vsdrba @ git+https://github.com/ryandash/VS-DRBA.git
+vsdrba @ git+https://github.com/routineLife1/VS-DRBA.git
 vs_tiletools
 vapoursynth-scenechange
