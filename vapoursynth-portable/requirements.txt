@@ -1,16 +1,17 @@
---pre
---extra-index-url https://download.pytorch.org/whl/nightly/cu132
+--extra-index-url https://download.pytorch.org/whl/cu132
+--no-build-isolation
 
 # Build & Packaging Tools
 hatchling
 packaging
 setuptools
 wheel
+wheel-stub
 
-# PyTorch & TensorRT-RTX Nightly Stack (CUDA 13.2)
-torch
-torchvision
-torch_tensorrt_rtx
+# PyTorch & Standard TensorRT Stack (CUDA 13.2)
+torch==2.15.0+cu132
+torchvision==0.29.2+cu132
+torch-tensorrt==2.15.0+cu132
 cupy-cuda13x
 
 # VapourSynth Plugins & Tools
