@@ -9,9 +9,9 @@ wheel
 wheel-stub
 
 # PyTorch & Standard TensorRT Stack (CUDA 13.2)
-torch==2.15.0+cu132
-torchvision==0.29.2+cu132
-torch-tensorrt==2.15.0+cu132
+torch
+torchvision
+torch-tensorrt
 cupy-cuda13x
 
 # VapourSynth Plugins & Tools
