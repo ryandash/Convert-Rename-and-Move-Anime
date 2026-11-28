@@ -13,6 +13,7 @@ if not user_directory:
     raise ValueError("user_directory environment variable not set")
 plugins_dir = os.path.join(user_directory, "Documents", "vapoursynth-portable", "vs-plugins")
 core.std.LoadPlugin(os.path.join(plugins_dir, "LSMASHSource.dll"))
+core.std.LoadPlugin(os.path.join(plugins_dir, "MiscFilters.dll"))
 
 input_video = os.environ.get("VS_SOURCE")
 if not input_video:
@@ -36,8 +37,9 @@ clip = core.resize.Bicubic(
 clip = drba_rife(
     clip,
     model="4.25",
+    scale=2.0,
     sc=True,
-    sc_threshold=22,
+    sc_threshold=0.15,
     trt=True,
     trt_optimization_level=5,
     trt_cache_dir=user_directory + "/ConvertedVideos"
